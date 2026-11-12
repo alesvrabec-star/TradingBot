@@ -61,10 +61,10 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({
   ];
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs">
-      <div className="flex items-center gap-1">
-        <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider mr-2 hidden sm:inline">
-          {lang === 'cz' ? 'Nástroje grafu:' : 'Chart Tools:'}
+    <div className="flex items-center justify-between gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 sm:py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs overflow-x-auto no-scrollbar">
+      <div className="flex items-center gap-1 shrink-0">
+        <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider mr-1 hidden sm:inline">
+          {lang === 'cz' ? 'Nástroje:' : 'Tools:'}
         </span>
 
         {tools.map((t) => {
@@ -73,7 +73,7 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({
             <button
               key={t.id}
               onClick={() => setActiveTool(t.id)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-md font-medium transition-colors shrink-0 ${
                 isActive
                   ? 'bg-emerald-500 text-slate-950 shadow-sm'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
@@ -89,7 +89,7 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({
         {drawingCount > 0 && (
           <button
             onClick={onClearDrawings}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 rounded-md transition-colors ml-1"
+            className="flex items-center gap-1 px-2 py-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 rounded-md transition-colors ml-0.5 shrink-0"
             title={lang === 'cz' ? 'Smazat všechny kresby' : 'Clear all drawings'}
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -98,13 +98,14 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 shrink-0">
         <button
           onClick={onOpenIndicators}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium transition-colors border border-slate-700/60"
+          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium transition-colors border border-slate-700/60 whitespace-nowrap"
         >
           <Sliders className="w-3.5 h-3.5 text-emerald-400" />
-          <span>{lang === 'cz' ? 'Nastavení indikátorů' : 'Indicators'}</span>
+          <span className="hidden sm:inline">{lang === 'cz' ? 'Nastavení indikátorů' : 'Indicators'}</span>
+          <span className="sm:hidden">{lang === 'cz' ? 'Indikátory' : 'Indicators'}</span>
         </button>
       </div>
     </div>

@@ -890,6 +890,64 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     setVisibleCount((prev) => Math.min(220, Math.max(20, prev + zoomDelta)));
   };
 
+  // Mobile Touch Gestures (Pan & Pinch-to-zoom)
+  const touchStartRef = useRef<{ x: number; y: number; dist?: number } | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    if (e.touches.length === 1) {
+      const x = e.touches[0].clientX - rect.left;
+      const y = e.touches[0].clientY - rect.top;
+      touchStartRef.current = { x, y };
+      setDragStartX(x);
+      setDragStartOffset(scrollOffset);
+      setIsDragging(true);
+      setMousePos({ x, y });
+    } else if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.hypot(dx, dy);
+      touchStartRef.current = { x: 0, y: 0, dist };
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect || !touchStartRef.current) return;
+
+    if (e.touches.length === 1 && isDragging) {
+      const x = e.touches[0].clientX - rect.left;
+      const y = e.touches[0].clientY - rect.top;
+      setMousePos({ x, y });
+
+      const candleWidth = layout.chartWidth / Math.max(1, visibleCandles.length);
+      const deltaX = x - dragStartX;
+      const candlesShift = Math.round(deltaX / candleWidth);
+      setScrollOffset(Math.max(0, dragStartOffset + candlesShift));
+
+      const hoveredIdx = Math.floor(x / candleWidth);
+      if (hoveredIdx >= 0 && hoveredIdx < visibleCandles.length) {
+        setHoveredCandle(visibleCandles[hoveredIdx]);
+      }
+    } else if (e.touches.length === 2 && touchStartRef.current.dist) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.hypot(dx, dy);
+      const delta = dist - touchStartRef.current.dist;
+      if (Math.abs(delta) > 6) {
+        setVisibleCount((prev) => Math.min(220, Math.max(20, prev - (delta > 0 ? 3 : -3))));
+        touchStartRef.current.dist = dist;
+      }
+    }
+  };
+
+  const handleTouchEnd = () => {
+    setIsDragging(false);
+    touchStartRef.current = null;
+  };
+
   // Active Candle for Header Display
   const displayCandle = hoveredCandle || candles[candles.length - 1];
 
@@ -988,7 +1046,10 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           onMouseUp={handleMouseUp}
           onMouseLeave={() => setMousePos(null)}
           onWheel={handleWheel}
-          className="absolute inset-0 block w-full h-full"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          className="absolute inset-0 block w-full h-full touch-none"
         />
 
         {/* In-chart Drawing in progress tooltip */}
@@ -1002,19 +1063,19 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       </div>
 
       {/* Quick Indicator Tags Strip */}
-      <div className="flex items-center justify-between px-3 py-1 bg-slate-950 border-t border-slate-900 text-[11px] text-slate-500 font-mono">
-        <div className="flex items-center gap-3">
-          {indicators.showSma20 && <span className="text-cyan-400">SMA 20</span>}
-          {indicators.showSma50 && <span className="text-amber-400">SMA 50</span>}
-          {indicators.showSma200 && <span className="text-purple-400">SMA 200</span>}
-          {indicators.showEma9 && <span className="text-sky-400">EMA 9</span>}
-          {indicators.showEma21 && <span className="text-orange-400">EMA 21</span>}
-          {indicators.showBollinger && <span className="text-sky-300">BB (20, 2)</span>}
-          {indicators.showSuperTrend && <span className="text-emerald-400">SuperTrend (10, 3)</span>}
-          {indicators.showVwap && <span className="text-yellow-400">VWAP</span>}
+      <div className="flex items-center justify-between px-2 sm:px-3 py-1 bg-slate-950 border-t border-slate-900 text-[10px] sm:text-[11px] text-slate-500 font-mono gap-2 overflow-hidden">
+        <div className="flex items-center gap-2 sm:gap-3 overflow-x-auto no-scrollbar shrink">
+          {indicators.showSma20 && <span className="text-cyan-400 whitespace-nowrap">SMA 20</span>}
+          {indicators.showSma50 && <span className="text-amber-400 whitespace-nowrap">SMA 50</span>}
+          {indicators.showSma200 && <span className="text-purple-400 whitespace-nowrap">SMA 200</span>}
+          {indicators.showEma9 && <span className="text-sky-400 whitespace-nowrap">EMA 9</span>}
+          {indicators.showEma21 && <span className="text-orange-400 whitespace-nowrap">EMA 21</span>}
+          {indicators.showBollinger && <span className="text-sky-300 whitespace-nowrap">BB (20, 2)</span>}
+          {indicators.showSuperTrend && <span className="text-emerald-400 whitespace-nowrap">SuperTrend</span>}
+          {indicators.showVwap && <span className="text-yellow-400 whitespace-nowrap">VWAP</span>}
         </div>
-        <div className="text-slate-500 text-[10px]">
-          {lang === 'cz' ? 'Kolečko myši: Zoom · Táhnutí: Posun v čase' : 'Mouse wheel: Zoom · Drag: Pan time'}
+        <div className="text-slate-500 text-[9px] sm:text-[10px] whitespace-nowrap shrink-0">
+          {lang === 'cz' ? 'Dotyk: 1 prst posun · 2 prsty zoom' : 'Touch: 1-finger pan · Pinch zoom'}
         </div>
       </div>
     </div>

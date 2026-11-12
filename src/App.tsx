@@ -31,6 +31,7 @@ import { LiveOrderBook } from './components/OrderBook/LiveOrderBook';
 import { IndicatorModal } from './components/Chart/IndicatorModal';
 import { MarketScreener } from './components/Screener/MarketScreener';
 import { GeminiAnalysisModal } from './components/AIAnalysis/GeminiAnalysisModal';
+import { PWAInstallModal } from './components/PWA/PWAInstallModal';
 import {
   Sparkles,
   Search,
@@ -40,6 +41,9 @@ import {
   Layers,
   RefreshCw,
   Zap,
+  BarChart2,
+  Gauge,
+  BookOpen,
 } from 'lucide-react';
 
 const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '1h', '4h', '1D', '1W'];
@@ -82,10 +86,12 @@ export default function App() {
   const [activeDrawingTool, setActiveDrawingTool] = useState<DrawingTool>('select');
   const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
 
-  // Modals
+  // Modals & Navigation
   const [isIndicatorModalOpen, setIsIndicatorModalOpen] = useState(false);
   const [isScreenerOpen, setIsScreenerOpen] = useState(false);
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
+  const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<'chart' | 'summary' | 'book'>('chart');
 
   // Market Historical Data & Real-time State
   const [candles, setCandles] = useState<Candle[]>(() =>
@@ -254,6 +260,7 @@ export default function App() {
         onOpenScreener={() => setIsScreenerOpen(true)}
         onOpenIndicators={() => setIsIndicatorModalOpen(true)}
         onOpenAIAnalysis={() => setIsAIModalOpen(true)}
+        onOpenInstallModal={() => setIsInstallModalOpen(true)}
         lang={lang}
         onToggleLang={() => setLang(lang === 'cz' ? 'en' : 'cz')}
       />
@@ -269,10 +276,10 @@ export default function App() {
       />
 
       {/* 3. Sub-header: Active Ticker Quick Info & Timeframe Selectors */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 lg:px-6 py-2.5 bg-slate-900/60 border-b border-slate-800">
-        <div className="flex items-center gap-4">
-          <div className="flex items-baseline gap-2.5">
-            <span className="text-lg font-extrabold text-white tracking-tight">{activeTicker.symbol}</span>
+      <div className="flex flex-wrap items-center justify-between gap-2.5 px-3 sm:px-4 lg:px-6 py-2 bg-slate-900/60 border-b border-slate-800">
+        <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
+          <div className="flex items-baseline gap-2">
+            <span className="text-base sm:text-lg font-extrabold text-white tracking-tight">{activeTicker.symbol}</span>
             <span className="text-sm font-mono font-bold text-white tabular-nums">
               {formatPrice(activeTicker.price, activeTicker.currency)}
             </span>
@@ -285,7 +292,7 @@ export default function App() {
               {activeTicker.change.toFixed(2)} ({activeTicker.changePercent >= 0 ? '+' : ''}
               {activeTicker.changePercent.toFixed(2)}%)
             </span>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-emerald-400 font-semibold border border-slate-700/60">
+            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-emerald-400 font-semibold border border-slate-700/60">
               {activeTicker.currency}
             </span>
           </div>
@@ -304,22 +311,22 @@ export default function App() {
         </div>
 
         {/* Timeframe Segmented Control & Live Sync Button */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 ml-auto sm:ml-0">
           <button
             onClick={handleManualRefresh}
             disabled={isDataSyncing}
-            className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-colors disabled:opacity-50"
+            className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-colors disabled:opacity-50 shrink-0"
             title={lang === 'cz' ? 'Aktualizovat reálná tržní data' : 'Refresh real market data'}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isDataSyncing ? 'animate-spin text-emerald-400' : ''}`} />
           </button>
 
-          <div className="flex items-center gap-1 p-1 bg-slate-950 rounded-lg border border-slate-800">
+          <div className="flex items-center gap-0.5 p-0.5 bg-slate-950 rounded-lg border border-slate-800 overflow-x-auto max-w-[230px] sm:max-w-none">
             {TIMEFRAMES.map((tf) => (
               <button
                 key={tf}
                 onClick={() => setTimeframe(tf)}
-                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                className={`px-2 py-0.5 sm:px-2.5 sm:py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
                   timeframe === tf
                     ? 'bg-emerald-500 text-slate-950 font-bold shadow-xs'
                     : 'text-slate-400 hover:text-white'
@@ -332,10 +339,64 @@ export default function App() {
         </div>
       </div>
 
+      {/* Mobile Responsive Navigation Tab Bar (< lg screens) */}
+      <div className="flex lg:hidden items-center justify-around px-3 py-1.5 bg-slate-900/95 border-b border-slate-800 sticky top-0 z-20 backdrop-blur-xs">
+        <button
+          onClick={() => setMobileTab('chart')}
+          className={`flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all ${
+            mobileTab === 'chart'
+              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-xs'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <BarChart2 className="w-3.5 h-3.5" />
+          <span>{lang === 'cz' ? 'Graf' : 'Chart'}</span>
+        </button>
+
+        <button
+          onClick={() => setMobileTab('summary')}
+          className={`flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all ${
+            mobileTab === 'summary'
+              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-xs'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Gauge className="w-3.5 h-3.5" />
+          <span>{lang === 'cz' ? 'Signály & AI' : 'Signals & AI'}</span>
+          <span
+            className={`text-[9px] px-1 py-0.2 rounded font-mono font-bold ${
+              technicalGauge.score > 20
+                ? 'bg-emerald-500/30 text-emerald-300'
+                : technicalGauge.score < -20
+                ? 'bg-rose-500/30 text-rose-300'
+                : 'bg-amber-500/30 text-amber-300'
+            }`}
+          >
+            {technicalGauge.score > 0 ? `+${technicalGauge.score}` : technicalGauge.score}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setMobileTab('book')}
+          className={`flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all ${
+            mobileTab === 'book'
+              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-xs'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <BookOpen className="w-3.5 h-3.5" />
+          <span>{lang === 'cz' ? 'Order Book' : 'Order Book'}</span>
+        </button>
+      </div>
+
       {/* 4. Main Terminal Workspace */}
       <main className="flex-1 flex flex-col lg:flex-row p-2 sm:p-3 lg:p-4 gap-3 overflow-hidden">
-        {/* Left Column: Drawing Toolbar + Chart Canvas + Subchart */}
-        <div className="flex-1 flex flex-col min-w-0 space-y-2.5 h-[620px] lg:h-[calc(100vh-175px)]">
+        {/* Left Column: Drawing Toolbar + Chart Canvas (Visible when mobileTab === 'chart' on mobile, or always on desktop lg+) */}
+        <div
+          className={`flex-1 flex-col min-w-0 space-y-2.5 ${
+            mobileTab === 'chart' ? 'flex h-[calc(100vh-215px)] min-h-[480px]' : 'hidden'
+          } lg:flex lg:h-[calc(100vh-175px)]`}
+        >
           {/* Drawing and Indicator Tools */}
           <DrawingToolbar
             activeTool={activeDrawingTool}
@@ -346,7 +407,7 @@ export default function App() {
             lang={lang}
           />
 
-          {/* Interactive Candlestick Chart */}
+          {/* Interactive Candlestick Chart with touch panning & pinch zoom */}
           <div className="flex-1 min-h-0">
             <TradingChart
               candles={candles}
@@ -365,9 +426,19 @@ export default function App() {
         </div>
 
         {/* Right Column: Quantitative Technical Summary & Order Book */}
-        <div className="w-full lg:w-[360px] xl:w-[400px] shrink-0 flex flex-col space-y-3 h-auto lg:h-[calc(100vh-175px)]">
+        {/* On mobile: displayed conditionally according to mobileTab */}
+        {/* On desktop (lg+): displayed simultaneously in side-by-side column */}
+        <div
+          className={`w-full lg:w-[360px] xl:w-[400px] shrink-0 flex-col space-y-3 ${
+            mobileTab !== 'chart' ? 'flex h-[calc(100vh-215px)] min-h-[480px]' : 'hidden'
+          } lg:flex lg:h-[calc(100vh-175px)]`}
+        >
           {/* Top Half: Quantitative Technical Summary & Gauge */}
-          <div className="h-[360px] lg:h-[55%] rounded-xl overflow-hidden border border-slate-800 shadow-md">
+          <div
+            className={`rounded-xl overflow-hidden border border-slate-800 shadow-md ${
+              mobileTab === 'summary' ? 'flex flex-1 h-full' : 'hidden'
+            } lg:flex lg:h-[55%]`}
+          >
             <TechnicalSummary
               ticker={activeTicker}
               timeframe={timeframe}
@@ -379,7 +450,11 @@ export default function App() {
           </div>
 
           {/* Bottom Half: Live Level 2 Order Book & Trades Tape */}
-          <div className="h-[300px] lg:h-[45%] rounded-xl overflow-hidden border border-slate-800 shadow-md">
+          <div
+            className={`rounded-xl overflow-hidden border border-slate-800 shadow-md ${
+              mobileTab === 'book' ? 'flex flex-1 h-full' : 'hidden'
+            } lg:flex lg:h-[45%]`}
+          >
             <LiveOrderBook
               orderBook={orderBook}
               trades={trades}
@@ -416,6 +491,12 @@ export default function App() {
         gauge={technicalGauge}
         indicators={indicatorValues}
         patterns={patterns}
+        lang={lang}
+      />
+
+      <PWAInstallModal
+        isOpen={isInstallModalOpen}
+        onClose={() => setIsInstallModalOpen(false)}
         lang={lang}
       />
     </div>
