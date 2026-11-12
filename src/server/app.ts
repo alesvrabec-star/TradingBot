@@ -8,7 +8,7 @@ export const app = express();
 
 app.use(express.json());
 
-// Enable CORS for Vercel and cross-origin requests
+// Enable CORS for Vercel and cross-origin requests + URL normalization
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -16,6 +16,18 @@ app.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
+
+  // Recover original URL path if Vercel serverless function rewrite stripped it
+  const matchedPath =
+    req.headers['x-matched-path'] ||
+    req.headers['x-vercel-matched-path'] ||
+    req.headers['x-forwarded-uri'] ||
+    req.headers['x-original-url'];
+
+  if (typeof matchedPath === 'string' && matchedPath.startsWith('/api') && req.url === '/api') {
+    req.url = matchedPath;
+  }
+
   next();
 });
 
@@ -52,25 +64,41 @@ const DEFAULT_SYMBOLS_METADATA: Record<string, { name: string; sector: string }>
 };
 
 async function fetchYahooChart(symbol: string, interval: string, range: string) {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}`;
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      Accept: 'application/json, text/plain, */*',
-      'Accept-Language': 'en-US,en;q=0.9',
-    },
-  });
+  const hosts = [
+    'https://query1.finance.yahoo.com',
+    'https://query2.finance.yahoo.com',
+  ];
 
-  if (!response.ok) {
-    throw new Error(`Yahoo Finance API error: ${response.statusText} (${response.status})`);
+  let lastError: Error | null = null;
+
+  for (const host of hosts) {
+    try {
+      const url = `${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}`;
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          Accept: 'application/json, text/plain, */*',
+          'Accept-Language': 'en-US,en;q=0.9',
+          Referer: 'https://finance.yahoo.com/',
+        },
+      });
+
+      if (response.ok) {
+        const json = await response.json();
+        const result = json?.chart?.result?.[0];
+        if (result) {
+          return result;
+        }
+      } else {
+        lastError = new Error(`Yahoo Finance (${host}) returned status ${response.status}`);
+      }
+    } catch (err: any) {
+      lastError = err;
+    }
   }
 
-  const json = await response.json();
-  const result = json?.chart?.result?.[0];
-  if (!result) {
-    throw new Error(`No data returned for symbol: ${symbol}`);
-  }
-  return result;
+  throw lastError || new Error(`No data returned for symbol: ${symbol}`);
 }
 
 // Router containing all market and AI routes
@@ -314,7 +342,17 @@ router.get('/market/tickers', async (req: Request, res: Response) => {
       }
     } catch (err: any) {
       console.warn(`Fallback for ${sym}:`, err.message);
-      const fallbackPrice = sym === 'CEZ.PR' ? 1332.0 : sym === 'BTC-USD' ? 74000.0 : sym === 'NVDA' ? 168.89 : sym === 'ERBAG.PR' ? 1315.0 : sym === 'KOMB.PR' ? 885.0 : 236.4;
+      const fallbackPrice =
+        sym === 'CEZ.PR' ? 1341.0 :
+        sym === 'BTC-USD' ? 73340.0 :
+        sym === 'NVDA' ? 173.73 :
+        sym === 'MSFT' ? 521.13 :
+        sym === 'AAPL' ? 355.63 :
+        sym === 'TSLA' ? 390.84 :
+        sym === 'SPY' ? 759.81 :
+        sym === 'QQQ' ? 690.38 :
+        sym === 'ERBAG.PR' ? 2859.0 :
+        sym === 'KOMB.PR' ? 995.0 : 250.0;
       const fallbackCurrency = sym.endsWith('.PR') ? 'CZK' : 'USD';
       results.push({
         symbol: sym,
