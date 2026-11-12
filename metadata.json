@@ -1,0 +1,6 @@
+{
+  "name": "QuantPulse Pro - Analýza Akcií v Reálném Čase",
+  "description": "Profesionální platforma pro technickou analýzu akciových trhů v reálném čase s interaktivními svíčkovými grafy, indikátory (RSI, MACD, Bollinger, EMA), automatickým rozpoznáváním patternů a AI kvantitativním rozborem.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
