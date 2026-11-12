@@ -66,7 +66,54 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   lang,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Dynamic Chart Dimensions State
+  const [dimensions, setDimensions] = useState<{ width: number; height: number }>({
+    width: 0,
+    height: 0,
+  });
+
+  // Measure canvas container dimensions with ResizeObserver so chart immediately fills window on first load
+  useEffect(() => {
+    const container = canvasContainerRef.current;
+    if (!container) return;
+
+    const measure = () => {
+      const rect = container.getBoundingClientRect();
+      const w = Math.round(rect.width || container.clientWidth || 0);
+      const h = Math.round(rect.height || container.clientHeight || 0);
+      if (w > 0 && h > 0) {
+        setDimensions((prev) => {
+          if (prev.width === w && prev.height === h) return prev;
+          return { width: w, height: h };
+        });
+      }
+    };
+
+    // Measure immediately
+    measure();
+
+    // Re-check after paint
+    const rafId = requestAnimationFrame(measure);
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => {
+        measure();
+      });
+      resizeObserver.observe(container);
+    }
+
+    window.addEventListener('resize', measure);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      if (resizeObserver) resizeObserver.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, []);
 
   // Viewport / Zoom & Pan State
   const [visibleCount, setVisibleCount] = useState<number>(75);
@@ -122,20 +169,21 @@ export const TradingChart: React.FC<TradingChartProps> = ({
 
   // Convert chart coords to price & time
   const layout = useMemo(() => {
-    const width = containerRef.current?.clientWidth || 900;
-    const height = containerRef.current?.clientHeight || 560;
+    const container = canvasContainerRef.current;
+    const width = dimensions.width > 0 ? dimensions.width : (container?.clientWidth || 900);
+    const height = dimensions.height > 0 ? dimensions.height : (container?.clientHeight || 560);
 
     const rightMargin = ticker.currency === 'CZK' ? 84 : 72; // Price axis width
     const bottomMargin = 28; // Time axis height
     const topMargin = 32; // Top padding
 
     const subchartHeight = indicators.activeSubchart === 'none' ? 0 : Math.round(height * 0.24);
-    const mainChartHeight = height - topMargin - bottomMargin - subchartHeight - (subchartHeight > 0 ? 12 : 0);
+    const mainChartHeight = Math.max(80, height - topMargin - bottomMargin - subchartHeight - (subchartHeight > 0 ? 12 : 0));
 
     return {
       width,
       height,
-      chartWidth: width - rightMargin,
+      chartWidth: Math.max(100, width - rightMargin),
       mainChartTop: topMargin,
       mainChartHeight,
       mainChartBottom: topMargin + mainChartHeight,
@@ -144,7 +192,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       rightMargin,
       bottomMargin,
     };
-  }, [indicators.activeSubchart, ticker.currency]);
+  }, [dimensions.width, dimensions.height, indicators.activeSubchart, ticker.currency]);
 
   // Find min and max price in visible window
   const priceRange = useMemo(() => {
@@ -221,8 +269,10 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     const dpr = window.devicePixelRatio || 1;
     const { width, height } = layout;
 
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
+    if (width <= 0 || height <= 0) return;
+
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
 
@@ -1038,7 +1088,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       </div>
 
       {/* Main Chart Canvas Area */}
-      <div className="relative flex-1 w-full h-full cursor-crosshair">
+      <div ref={canvasContainerRef} className="relative flex-1 w-full h-full cursor-crosshair min-h-0 overflow-hidden">
         <canvas
           ref={canvasRef}
           onMouseMove={handleMouseMove}
