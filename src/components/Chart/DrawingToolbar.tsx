@@ -61,7 +61,7 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({
   ];
 
   return (
-    <div className="flex items-center justify-between gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 sm:py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs overflow-x-auto no-scrollbar">
+    <div className="shrink-0 flex items-center justify-between gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs overflow-x-auto no-scrollbar">
       <div className="flex items-center gap-1 shrink-0">
         <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider mr-1 hidden sm:inline">
           {lang === 'cz' ? 'Nástroje:' : 'Tools:'}

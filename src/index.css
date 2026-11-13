@@ -6,14 +6,25 @@
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   }
 
+  html,
   body {
     overflow-x: hidden;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .font-mono, [data-tabular="true"] {
     font-family: 'JetBrains Mono', monospace;
     font-variant-numeric: tabular-nums;
   }
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* Custom sleek scrollbars for trading panels */

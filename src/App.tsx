@@ -252,7 +252,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex flex-col min-h-[100dvh] w-full max-w-full overflow-x-hidden bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-400">
+    <div className="flex flex-col h-[100dvh] lg:min-h-screen lg:h-auto w-full max-w-full overflow-hidden lg:overflow-x-hidden lg:overflow-y-auto pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-400">
       {/* 1. Header (Strict Top Bar Contract) */}
       <TopNav
         isStreaming={isStreaming}
@@ -276,15 +276,15 @@ export default function App() {
       />
 
       {/* 3. Sub-header: Active Ticker Quick Info & Timeframe Selectors */}
-      <div className="flex flex-wrap items-center justify-between gap-2.5 px-3 sm:px-4 lg:px-6 py-2 bg-slate-900/60 border-b border-slate-800">
+      <div className="shrink-0 flex flex-wrap items-center justify-between gap-1.5 sm:gap-2.5 px-2.5 sm:px-4 lg:px-6 py-1 sm:py-2 bg-slate-900/60 border-b border-slate-800">
         <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
-          <div className="flex items-baseline gap-2">
-            <span className="text-base sm:text-lg font-extrabold text-white tracking-tight">{activeTicker.symbol}</span>
-            <span className="text-sm font-mono font-bold text-white tabular-nums">
+          <div className="flex items-baseline gap-1.5 sm:gap-2">
+            <span className="text-sm sm:text-lg font-extrabold text-white tracking-tight">{activeTicker.symbol}</span>
+            <span className="text-xs sm:text-sm font-mono font-bold text-white tabular-nums">
               {formatPrice(activeTicker.price, activeTicker.currency)}
             </span>
             <span
-              className={`text-xs font-mono font-bold tabular-nums flex items-center ${
+              className={`text-[11px] sm:text-xs font-mono font-bold tabular-nums flex items-center ${
                 activeTicker.change >= 0 ? 'text-emerald-400' : 'text-rose-400'
               }`}
             >
@@ -292,7 +292,7 @@ export default function App() {
               {activeTicker.change.toFixed(2)} ({activeTicker.changePercent >= 0 ? '+' : ''}
               {activeTicker.changePercent.toFixed(2)}%)
             </span>
-            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-emerald-400 font-semibold border border-slate-700/60">
+            <span className="text-[9px] sm:text-[10px] font-mono px-1 sm:px-1.5 py-0.2 rounded bg-slate-800 text-emerald-400 font-semibold border border-slate-700/60">
               {activeTicker.currency}
             </span>
           </div>
@@ -311,11 +311,11 @@ export default function App() {
         </div>
 
         {/* Timeframe Segmented Control & Live Sync Button */}
-        <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end">
+        <div className="flex items-center gap-1 sm:gap-1.5 w-full sm:w-auto justify-between sm:justify-end">
           <button
             onClick={handleManualRefresh}
             disabled={isDataSyncing}
-            className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-colors disabled:opacity-50 shrink-0"
+            className="p-1 sm:p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-colors disabled:opacity-50 shrink-0"
             title={lang === 'cz' ? 'Aktualizovat reálná tržní data' : 'Refresh real market data'}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isDataSyncing ? 'animate-spin text-emerald-400' : ''}`} />
@@ -326,7 +326,7 @@ export default function App() {
               <button
                 key={tf}
                 onClick={() => setTimeframe(tf)}
-                className={`px-2 py-0.5 sm:px-2.5 sm:py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                className={`px-2 py-0.5 sm:px-2.5 sm:py-1 text-[11px] sm:text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
                   timeframe === tf
                     ? 'bg-emerald-500 text-slate-950 font-bold shadow-xs'
                     : 'text-slate-400 hover:text-white'
@@ -340,10 +340,10 @@ export default function App() {
       </div>
 
       {/* Mobile Responsive Navigation Tab Bar (< lg screens) */}
-      <div className="flex lg:hidden items-center justify-around px-3 py-1.5 bg-slate-900/95 border-b border-slate-800 sticky top-0 z-20 backdrop-blur-xs">
+      <div className="shrink-0 flex lg:hidden items-center justify-around px-2 py-1 bg-slate-900/95 border-b border-slate-800 z-20 backdrop-blur-xs">
         <button
           onClick={() => setMobileTab('chart')}
-          className={`flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all ${
+          className={`flex items-center gap-1.5 py-1 px-3 rounded-lg text-xs font-semibold transition-all ${
             mobileTab === 'chart'
               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-xs'
               : 'text-slate-400 hover:text-white'
@@ -355,7 +355,7 @@ export default function App() {
 
         <button
           onClick={() => setMobileTab('summary')}
-          className={`flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all ${
+          className={`flex items-center gap-1.5 py-1 px-3 rounded-lg text-xs font-semibold transition-all ${
             mobileTab === 'summary'
               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-xs'
               : 'text-slate-400 hover:text-white'
@@ -378,7 +378,7 @@ export default function App() {
 
         <button
           onClick={() => setMobileTab('book')}
-          className={`flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all ${
+          className={`flex items-center gap-1.5 py-1 px-3 rounded-lg text-xs font-semibold transition-all ${
             mobileTab === 'book'
               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-xs'
               : 'text-slate-400 hover:text-white'
@@ -390,12 +390,12 @@ export default function App() {
       </div>
 
       {/* 4. Main Terminal Workspace */}
-      <main className="flex-1 flex flex-col lg:flex-row p-2 sm:p-3 lg:p-4 gap-2.5 sm:gap-3 w-full min-w-0">
+      <main className="flex-1 min-h-0 flex flex-col lg:flex-row p-1.5 sm:p-3 lg:p-4 gap-1.5 sm:gap-3 w-full min-w-0 overflow-hidden lg:overflow-visible">
         {/* Left Column: Drawing Toolbar + Chart Canvas (Visible when mobileTab === 'chart' on mobile, or always on desktop lg+) */}
         <div
-          className={`flex-col w-full min-w-0 space-y-2 ${
+          className={`flex-col w-full min-w-0 flex-1 min-h-0 space-y-1.5 lg:space-y-2.5 ${
             mobileTab === 'chart' ? 'flex' : 'hidden'
-          } lg:flex lg:flex-1 lg:h-[calc(100vh-175px)]`}
+          } lg:flex lg:h-[calc(100vh-175px)]`}
         >
           {/* Drawing and Indicator Tools */}
           <DrawingToolbar
@@ -407,8 +407,8 @@ export default function App() {
             lang={lang}
           />
 
-          {/* Interactive Candlestick Chart with explicit mobile height so iOS Safari never collapses flex canvas */}
-          <div className="flex flex-col w-full h-[460px] sm:h-[540px] lg:flex-1 lg:h-full lg:min-h-0">
+          {/* Interactive Candlestick Chart filling exact remaining 100dvh space */}
+          <div className="flex flex-col flex-1 w-full min-h-0 lg:h-full">
             <TradingChart
               candles={candles}
               ticker={activeTicker}
@@ -429,15 +429,15 @@ export default function App() {
         {/* On mobile: displayed conditionally according to mobileTab */}
         {/* On desktop (lg+): displayed simultaneously in side-by-side column */}
         <div
-          className={`w-full lg:w-[360px] xl:w-[400px] shrink-0 flex-col space-y-3 ${
+          className={`w-full lg:w-[360px] xl:w-[400px] shrink-0 lg:shrink-0 flex-1 min-h-0 lg:flex-none flex-col space-y-2 lg:space-y-3 ${
             mobileTab !== 'chart' ? 'flex' : 'hidden'
           } lg:flex lg:h-[calc(100vh-175px)]`}
         >
           {/* Top Half: Quantitative Technical Summary & Gauge */}
           <div
             className={`rounded-xl overflow-hidden border border-slate-800 shadow-md ${
-              mobileTab === 'summary' ? 'flex flex-col w-full h-[520px]' : 'hidden'
-            } lg:flex lg:flex-col lg:h-[55%]`}
+              mobileTab === 'summary' ? 'flex flex-col flex-1 w-full min-h-0' : 'hidden'
+            } lg:flex lg:flex-col lg:flex-none lg:h-[55%]`}
           >
             <TechnicalSummary
               ticker={activeTicker}
@@ -452,8 +452,8 @@ export default function App() {
           {/* Bottom Half: Live Level 2 Order Book & Trades Tape */}
           <div
             className={`rounded-xl overflow-hidden border border-slate-800 shadow-md ${
-              mobileTab === 'book' ? 'flex flex-col w-full h-[480px]' : 'hidden'
-            } lg:flex lg:flex-col lg:h-[45%]`}
+              mobileTab === 'book' ? 'flex flex-col flex-1 w-full min-h-0' : 'hidden'
+            } lg:flex lg:flex-col lg:flex-none lg:h-[45%]`}
           >
             <LiveOrderBook
               orderBook={orderBook}

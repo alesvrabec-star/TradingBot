@@ -21,8 +21,8 @@ export const TickerBar: React.FC<TickerBarProps> = ({
   lang,
 }) => {
   return (
-    <div className="w-full bg-slate-900/90 border-b border-slate-800/80 px-2 sm:px-4 py-1.5 overflow-x-auto">
-      <div className="flex items-center gap-2 min-w-max">
+    <div className="shrink-0 w-full bg-slate-900/90 border-b border-slate-800/80 px-2 sm:px-4 py-1 sm:py-1.5 overflow-x-auto no-scrollbar">
+      <div className="flex items-center gap-1.5 sm:gap-2 min-w-max">
         {tickers.map((t) => {
           const isSelected = t.symbol === activeTicker.symbol;
           const isPositive = t.change >= 0;
@@ -37,7 +37,7 @@ export const TickerBar: React.FC<TickerBarProps> = ({
             <button
               key={t.symbol}
               onClick={() => onSelectTicker(t)}
-              className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-left transition-all duration-150 ${
+              className={`flex items-center gap-2 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-left transition-all duration-150 ${
                 isSelected
                   ? 'bg-slate-800 border border-slate-700 shadow-xs'
                   : 'hover:bg-slate-800/60 border border-transparent'

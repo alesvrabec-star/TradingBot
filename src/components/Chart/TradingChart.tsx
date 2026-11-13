@@ -115,8 +115,10 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     };
   }, []);
 
-  // Viewport / Zoom & Pan State
-  const [visibleCount, setVisibleCount] = useState<number>(75);
+  // Viewport / Zoom & Pan State (fewer candles on mobile for readable candle bodies)
+  const [visibleCount, setVisibleCount] = useState<number>(() =>
+    typeof window !== 'undefined' && window.innerWidth < 640 ? 42 : 75
+  );
   const [scrollOffset, setScrollOffset] = useState<number>(0); // 0 = right-most (latest candles)
   const [hoveredCandle, setHoveredCandle] = useState<Candle | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
@@ -464,8 +466,12 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       ctx.fillRect(x - barWidth / 2, bodyTop, barWidth, bodyHeight);
     });
 
-    // 5. Pattern Recognition Markers on Candles
+    // 5. Pattern Recognition Markers on Candles (with horizontal collision filtering for labels)
     if (showPatternMarkers && patterns.length > 0) {
+      const minLabelGap = layout.width < 520 ? 48 : 30;
+      let lastBullLabelX = -999;
+      let lastBearLabelX = -999;
+
       patterns.forEach((pattern) => {
         const indexInVisible = pattern.candleIndex - startIndex;
         if (indexInVisible >= 0 && indexInVisible < visibleCandles.length) {
@@ -473,23 +479,32 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           const c = visibleCandles[indexInVisible];
           const isBull = pattern.type === 'bullish';
           const isBear = pattern.type === 'bearish';
-          const y = isBull ? getY(c.low) + 16 : getY(c.high) - 16;
+          const y = isBull ? getY(c.low) + 14 : getY(c.high) - 14;
 
-          // Pin marker dot & tag
+          // Pin marker dot
           ctx.beginPath();
-          ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+          ctx.arc(x, y, layout.width < 520 ? 3.5 : 4.5, 0, Math.PI * 2);
           ctx.fillStyle = isBull ? '#10b981' : isBear ? '#ef4444' : '#38bdf8';
           ctx.fill();
           ctx.strokeStyle = '#020617';
           ctx.lineWidth = 1.5;
           ctx.stroke();
 
-          // Small subtle text badge
-          ctx.fillStyle = isBull ? '#34d399' : isBear ? '#f87171' : '#7dd3fc';
-          ctx.font = '9px "JetBrains Mono", monospace';
-          ctx.textAlign = 'center';
-          const shortName = pattern.name.split(' ')[0];
-          ctx.fillText(shortName, x, isBull ? y + 12 : y - 6);
+          // Draw text badge only when it won't overlap an adjacent label on the same side
+          const canDrawLabel = isBull
+            ? Math.abs(x - lastBullLabelX) >= minLabelGap
+            : Math.abs(x - lastBearLabelX) >= minLabelGap;
+
+          if (canDrawLabel) {
+            if (isBull) lastBullLabelX = x;
+            else lastBearLabelX = x;
+
+            ctx.fillStyle = isBull ? '#34d399' : isBear ? '#f87171' : '#7dd3fc';
+            ctx.font = layout.width < 520 ? '8px "JetBrains Mono", monospace' : '9px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            const shortName = pattern.name.split(' ')[0];
+            ctx.fillText(shortName, x, isBull ? y + 11 : y - 6);
+          }
         }
       });
     }
@@ -1007,30 +1022,30 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   return (
     <div
       ref={containerRef}
-      className="relative flex flex-col w-full h-full min-h-[380px] bg-slate-950 border border-slate-800 rounded-xl overflow-hidden select-none"
+      className="relative flex flex-col w-full h-full min-h-0 bg-slate-950 border border-slate-800 rounded-xl overflow-hidden select-none"
     >
       {/* Top Legend Bar: Symbol, O/H/L/C/V values, Active indicators */}
-      <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-2 bg-slate-900/90 border-b border-slate-800 text-xs text-slate-300">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
-          <span className="font-bold text-white text-sm tracking-tight shrink-0">{ticker.symbol}</span>
+      <div className="shrink-0 flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1 sm:py-2 bg-slate-900/90 border-b border-slate-800 text-xs text-slate-300">
+        <div className="flex flex-wrap items-center gap-x-2 sm:gap-x-3 gap-y-0.5 min-w-0">
+          <span className="hidden sm:inline font-bold text-white text-sm tracking-tight shrink-0">{ticker.symbol}</span>
           <span className="text-slate-400 hidden sm:inline truncate">{ticker.name}</span>
 
           {displayCandle && (
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono tabular-nums text-[11px] sm:text-xs">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono tabular-nums text-[10px] sm:text-xs">
               <span className="whitespace-nowrap">
-                <span className="text-slate-400 mr-1">O:</span>
+                <span className="text-slate-400 mr-0.5 sm:mr-1">O:</span>
                 <span className="text-white">{formatPriceCompact(displayCandle.open, ticker.currency)}</span>
               </span>
               <span className="whitespace-nowrap">
-                <span className="text-slate-400 mr-1">H:</span>
+                <span className="text-slate-400 mr-0.5 sm:mr-1">H:</span>
                 <span className="text-emerald-400">{formatPriceCompact(displayCandle.high, ticker.currency)}</span>
               </span>
               <span className="whitespace-nowrap">
-                <span className="text-slate-400 mr-1">L:</span>
+                <span className="text-slate-400 mr-0.5 sm:mr-1">L:</span>
                 <span className="text-rose-400">{formatPriceCompact(displayCandle.low, ticker.currency)}</span>
               </span>
               <span className="whitespace-nowrap">
-                <span className="text-slate-400 mr-1">C:</span>
+                <span className="text-slate-400 mr-0.5 sm:mr-1">C:</span>
                 <span className={displayCandle.close >= displayCandle.open ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
                   {formatPriceCompact(displayCandle.close, ticker.currency)}
                 </span>
@@ -1044,7 +1059,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         </div>
 
         {/* Quick Zoom & Reset Controls */}
-        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+        <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 shrink-0">
           <button
             onClick={() => setVisibleCount((prev) => Math.max(20, prev - 15))}
             className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
@@ -1062,7 +1077,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           <button
             onClick={() => {
               setScrollOffset(0);
-              setVisibleCount(75);
+              setVisibleCount(layout.width < 520 ? 42 : 75);
             }}
             className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
             title="Reset pohledu na nejnovější svíčky"
@@ -1075,7 +1090,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           {/* Toggle Pattern Markers */}
           <button
             onClick={() => setShowPatternMarkers(!showPatternMarkers)}
-            className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
+            className={`flex items-center gap-1 px-1.5 sm:px-2 py-1 text-xs rounded transition-colors ${
               showPatternMarkers ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'
             }`}
           >
@@ -1089,7 +1104,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               <button
                 key={sub}
                 onClick={() => onUpdateIndicators({ activeSubchart: sub })}
-                className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors uppercase ${
+                className={`px-1.5 sm:px-2 py-0.5 text-[10px] sm:text-[11px] font-medium rounded transition-colors uppercase ${
                   indicators.activeSubchart === sub ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -1101,7 +1116,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       </div>
 
       {/* Main Chart Canvas Area */}
-      <div ref={canvasContainerRef} className="relative flex-1 w-full min-h-[260px] cursor-crosshair overflow-hidden">
+      <div ref={canvasContainerRef} className="relative flex-1 w-full min-h-[180px] cursor-crosshair overflow-hidden">
         <canvas
           ref={canvasRef}
           onMouseMove={handleMouseMove}
@@ -1117,7 +1132,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
 
         {/* In-chart Drawing in progress tooltip */}
         {drawingPoints.length > 0 && (
-          <div className="absolute top-4 left-4 bg-sky-950/90 text-sky-200 border border-sky-800 px-3 py-1.5 rounded-lg text-xs shadow-lg backdrop-blur">
+          <div className="absolute top-3 left-3 bg-sky-950/90 text-sky-200 border border-sky-800 px-2.5 py-1 rounded-lg text-[11px] sm:text-xs shadow-lg backdrop-blur">
             {lang === 'cz'
               ? 'Klikněte pro umístění 2. bodu (dokončení formace/měření)'
               : 'Click to place second coordinate point to complete drawing'}
@@ -1126,7 +1141,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       </div>
 
       {/* Quick Indicator Tags Strip */}
-      <div className="shrink-0 flex items-center justify-between px-2 sm:px-3 py-1 bg-slate-950 border-t border-slate-900 text-[10px] sm:text-[11px] text-slate-500 font-mono gap-2 overflow-hidden">
+      <div className="shrink-0 flex items-center justify-between px-2 sm:px-3 py-0.5 sm:py-1 bg-slate-950 border-t border-slate-900 text-[9px] sm:text-[11px] text-slate-500 font-mono gap-2 overflow-hidden">
         <div className="flex items-center gap-2 sm:gap-3 overflow-x-auto no-scrollbar shrink">
           {indicators.showSma20 && <span className="text-cyan-400 whitespace-nowrap">SMA 20</span>}
           {indicators.showSma50 && <span className="text-amber-400 whitespace-nowrap">SMA 50</span>}
@@ -1138,7 +1153,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           {indicators.showVwap && <span className="text-yellow-400 whitespace-nowrap">VWAP</span>}
         </div>
         <div className="text-slate-500 text-[9px] sm:text-[10px] whitespace-nowrap shrink-0">
-          {lang === 'cz' ? 'Dotyk: 1 prst posun · 2 prsty zoom' : 'Touch: 1-finger pan · Pinch zoom'}
+          {lang === 'cz' ? '1 prst posun · 2 prsty zoom' : '1-finger pan · Pinch'}
         </div>
       </div>
     </div>

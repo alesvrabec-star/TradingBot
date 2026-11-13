@@ -31,10 +31,10 @@ export const TopNav: React.FC<TopNavProps> = ({
   onToggleLang,
 }) => {
   return (
-    <header className="flex items-center justify-between gap-2 sm:gap-4 px-3 sm:px-4 lg:px-6 py-2.5 sm:py-3.5 bg-slate-950 border-b border-slate-800">
+    <header className="shrink-0 flex items-center justify-between gap-2 sm:gap-4 px-2.5 sm:px-4 lg:px-6 py-1.5 sm:py-3 bg-slate-950 border-b border-slate-800">
       {/* Zone 1: Wordmark & Logo */}
-      <div className="flex items-center gap-2 shrink-0">
-        <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg overflow-hidden border border-emerald-500/30 shrink-0 bg-slate-900 shadow-xs">
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-lg overflow-hidden border border-emerald-500/30 shrink-0 bg-slate-900 shadow-xs">
           <img
             src="/apple-touch-icon.png"
             alt="QuantPulse Logo"
