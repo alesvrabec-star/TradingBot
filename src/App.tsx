@@ -252,7 +252,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-400">
+    <div className="flex flex-col min-h-[100dvh] w-full max-w-full overflow-x-hidden bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-400">
       {/* 1. Header (Strict Top Bar Contract) */}
       <TopNav
         isStreaming={isStreaming}
@@ -311,7 +311,7 @@ export default function App() {
         </div>
 
         {/* Timeframe Segmented Control & Live Sync Button */}
-        <div className="flex items-center gap-1.5 ml-auto sm:ml-0">
+        <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end">
           <button
             onClick={handleManualRefresh}
             disabled={isDataSyncing}
@@ -321,7 +321,7 @@ export default function App() {
             <RefreshCw className={`w-3.5 h-3.5 ${isDataSyncing ? 'animate-spin text-emerald-400' : ''}`} />
           </button>
 
-          <div className="flex items-center gap-0.5 p-0.5 bg-slate-950 rounded-lg border border-slate-800 overflow-x-auto max-w-[230px] sm:max-w-none">
+          <div className="flex items-center gap-0.5 p-0.5 bg-slate-950 rounded-lg border border-slate-800 overflow-x-auto no-scrollbar max-w-full">
             {TIMEFRAMES.map((tf) => (
               <button
                 key={tf}
@@ -390,12 +390,12 @@ export default function App() {
       </div>
 
       {/* 4. Main Terminal Workspace */}
-      <main className="flex-1 flex flex-col lg:flex-row p-2 sm:p-3 lg:p-4 gap-3 overflow-hidden">
+      <main className="flex-1 flex flex-col lg:flex-row p-2 sm:p-3 lg:p-4 gap-2.5 sm:gap-3 w-full min-w-0">
         {/* Left Column: Drawing Toolbar + Chart Canvas (Visible when mobileTab === 'chart' on mobile, or always on desktop lg+) */}
         <div
-          className={`flex-1 flex-col min-w-0 space-y-2.5 ${
-            mobileTab === 'chart' ? 'flex h-[calc(100vh-215px)] min-h-[480px]' : 'hidden'
-          } lg:flex lg:h-[calc(100vh-175px)]`}
+          className={`flex-col w-full min-w-0 space-y-2 ${
+            mobileTab === 'chart' ? 'flex' : 'hidden'
+          } lg:flex lg:flex-1 lg:h-[calc(100vh-175px)]`}
         >
           {/* Drawing and Indicator Tools */}
           <DrawingToolbar
@@ -407,8 +407,8 @@ export default function App() {
             lang={lang}
           />
 
-          {/* Interactive Candlestick Chart with touch panning & pinch zoom */}
-          <div className="flex-1 min-h-0">
+          {/* Interactive Candlestick Chart with explicit mobile height so iOS Safari never collapses flex canvas */}
+          <div className="flex flex-col w-full h-[460px] sm:h-[540px] lg:flex-1 lg:h-full lg:min-h-0">
             <TradingChart
               candles={candles}
               ticker={activeTicker}
@@ -430,14 +430,14 @@ export default function App() {
         {/* On desktop (lg+): displayed simultaneously in side-by-side column */}
         <div
           className={`w-full lg:w-[360px] xl:w-[400px] shrink-0 flex-col space-y-3 ${
-            mobileTab !== 'chart' ? 'flex h-[calc(100vh-215px)] min-h-[480px]' : 'hidden'
+            mobileTab !== 'chart' ? 'flex' : 'hidden'
           } lg:flex lg:h-[calc(100vh-175px)]`}
         >
           {/* Top Half: Quantitative Technical Summary & Gauge */}
           <div
             className={`rounded-xl overflow-hidden border border-slate-800 shadow-md ${
-              mobileTab === 'summary' ? 'flex flex-1 h-full' : 'hidden'
-            } lg:flex lg:h-[55%]`}
+              mobileTab === 'summary' ? 'flex flex-col w-full h-[520px]' : 'hidden'
+            } lg:flex lg:flex-col lg:h-[55%]`}
           >
             <TechnicalSummary
               ticker={activeTicker}
@@ -452,8 +452,8 @@ export default function App() {
           {/* Bottom Half: Live Level 2 Order Book & Trades Tape */}
           <div
             className={`rounded-xl overflow-hidden border border-slate-800 shadow-md ${
-              mobileTab === 'book' ? 'flex flex-1 h-full' : 'hidden'
-            } lg:flex lg:h-[45%]`}
+              mobileTab === 'book' ? 'flex flex-col w-full h-[480px]' : 'hidden'
+            } lg:flex lg:flex-col lg:h-[45%]`}
           >
             <LiveOrderBook
               orderBook={orderBook}

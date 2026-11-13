@@ -173,9 +173,12 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     const width = dimensions.width > 0 ? dimensions.width : (container?.clientWidth || 900);
     const height = dimensions.height > 0 ? dimensions.height : (container?.clientHeight || 560);
 
-    const rightMargin = ticker.currency === 'CZK' ? 84 : 72; // Price axis width
-    const bottomMargin = 28; // Time axis height
-    const topMargin = 32; // Top padding
+    const isNarrow = width < 520;
+    const rightMargin = isNarrow
+      ? ticker.currency === 'CZK' ? 68 : 56
+      : ticker.currency === 'CZK' ? 84 : 72; // Price axis width
+    const bottomMargin = isNarrow ? 22 : 28; // Time axis height
+    const topMargin = isNarrow ? 20 : 32; // Top padding
 
     const subchartHeight = indicators.activeSubchart === 'none' ? 0 : Math.round(height * 0.24);
     const mainChartHeight = Math.max(80, height - topMargin - bottomMargin - subchartHeight - (subchartHeight > 0 ? 12 : 0));
@@ -1004,34 +1007,44 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   return (
     <div
       ref={containerRef}
-      className="relative flex flex-col w-full h-full bg-slate-950 border border-slate-800 rounded-xl overflow-hidden select-none"
+      className="relative flex flex-col w-full h-full min-h-[380px] bg-slate-950 border border-slate-800 rounded-xl overflow-hidden select-none"
     >
       {/* Top Legend Bar: Symbol, O/H/L/C/V values, Active indicators */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2 bg-slate-900/90 border-b border-slate-800 text-xs text-slate-300">
-        <div className="flex items-center gap-3">
-          <span className="font-bold text-white text-sm tracking-tight">{ticker.symbol}</span>
-          <span className="text-slate-400 hidden sm:inline">{ticker.name}</span>
+      <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-2 bg-slate-900/90 border-b border-slate-800 text-xs text-slate-300">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
+          <span className="font-bold text-white text-sm tracking-tight shrink-0">{ticker.symbol}</span>
+          <span className="text-slate-400 hidden sm:inline truncate">{ticker.name}</span>
 
           {displayCandle && (
-            <div className="flex items-center gap-2 font-mono tabular-nums text-xs">
-              <span className="text-slate-400">O:</span>
-              <span className="text-white">{formatPriceCompact(displayCandle.open, ticker.currency)}</span>
-              <span className="text-slate-400">H:</span>
-              <span className="text-emerald-400">{formatPriceCompact(displayCandle.high, ticker.currency)}</span>
-              <span className="text-slate-400">L:</span>
-              <span className="text-rose-400">{formatPriceCompact(displayCandle.low, ticker.currency)}</span>
-              <span className="text-slate-400">C:</span>
-              <span className={displayCandle.close >= displayCandle.open ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
-                {formatPriceCompact(displayCandle.close, ticker.currency)}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono tabular-nums text-[11px] sm:text-xs">
+              <span className="whitespace-nowrap">
+                <span className="text-slate-400 mr-1">O:</span>
+                <span className="text-white">{formatPriceCompact(displayCandle.open, ticker.currency)}</span>
               </span>
-              <span className="text-slate-400 hidden md:inline">V:</span>
-              <span className="text-slate-300 hidden md:inline">{displayCandle.volume.toLocaleString()}</span>
+              <span className="whitespace-nowrap">
+                <span className="text-slate-400 mr-1">H:</span>
+                <span className="text-emerald-400">{formatPriceCompact(displayCandle.high, ticker.currency)}</span>
+              </span>
+              <span className="whitespace-nowrap">
+                <span className="text-slate-400 mr-1">L:</span>
+                <span className="text-rose-400">{formatPriceCompact(displayCandle.low, ticker.currency)}</span>
+              </span>
+              <span className="whitespace-nowrap">
+                <span className="text-slate-400 mr-1">C:</span>
+                <span className={displayCandle.close >= displayCandle.open ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                  {formatPriceCompact(displayCandle.close, ticker.currency)}
+                </span>
+              </span>
+              <span className="hidden md:inline whitespace-nowrap">
+                <span className="text-slate-400 mr-1">V:</span>
+                <span className="text-slate-300">{displayCandle.volume.toLocaleString()}</span>
+              </span>
             </div>
           )}
         </div>
 
         {/* Quick Zoom & Reset Controls */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
           <button
             onClick={() => setVisibleCount((prev) => Math.max(20, prev - 15))}
             className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
@@ -1057,7 +1070,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
 
-          <div className="w-[1px] h-4 bg-slate-800 mx-1" />
+          <div className="w-[1px] h-4 bg-slate-800 mx-0.5" />
 
           {/* Toggle Pattern Markers */}
           <button
@@ -1088,7 +1101,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       </div>
 
       {/* Main Chart Canvas Area */}
-      <div ref={canvasContainerRef} className="relative flex-1 w-full h-full cursor-crosshair min-h-0 overflow-hidden">
+      <div ref={canvasContainerRef} className="relative flex-1 w-full min-h-[260px] cursor-crosshair overflow-hidden">
         <canvas
           ref={canvasRef}
           onMouseMove={handleMouseMove}
@@ -1113,7 +1126,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       </div>
 
       {/* Quick Indicator Tags Strip */}
-      <div className="flex items-center justify-between px-2 sm:px-3 py-1 bg-slate-950 border-t border-slate-900 text-[10px] sm:text-[11px] text-slate-500 font-mono gap-2 overflow-hidden">
+      <div className="shrink-0 flex items-center justify-between px-2 sm:px-3 py-1 bg-slate-950 border-t border-slate-900 text-[10px] sm:text-[11px] text-slate-500 font-mono gap-2 overflow-hidden">
         <div className="flex items-center gap-2 sm:gap-3 overflow-x-auto no-scrollbar shrink">
           {indicators.showSma20 && <span className="text-cyan-400 whitespace-nowrap">SMA 20</span>}
           {indicators.showSma50 && <span className="text-amber-400 whitespace-nowrap">SMA 50</span>}
