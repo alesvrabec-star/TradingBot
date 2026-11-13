@@ -1,18 +1,20 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Ticker,
   TechnicalGaugeSummary,
   TechnicalIndicatorValues,
   Timeframe,
+  AnalysisHorizon,
+  HorizonRecommendation,
 } from '../../types/market';
 import {
   Activity,
   Compass,
-  Layers,
   Sparkles,
+  Clock,
+  TrendingUp,
+  Target,
   ShieldAlert,
-  ArrowUpRight,
-  ArrowDownRight,
 } from 'lucide-react';
 import { formatPriceCompact } from '../../utils/formatters';
 
@@ -21,7 +23,9 @@ interface TechnicalSummaryProps {
   timeframe: Timeframe;
   gauge: TechnicalGaugeSummary;
   indicators: TechnicalIndicatorValues;
-  onOpenAIAnalysis: () => void;
+  shortTermRec: HorizonRecommendation;
+  longTermRec: HorizonRecommendation;
+  onOpenAIAnalysis: (horizon?: AnalysisHorizon) => void;
   lang: 'cz' | 'en';
 }
 
@@ -30,9 +34,13 @@ export const TechnicalSummary: React.FC<TechnicalSummaryProps> = ({
   timeframe,
   gauge,
   indicators,
+  shortTermRec,
+  longTermRec,
   onOpenAIAnalysis,
   lang,
 }) => {
+  const [selectedHorizon, setSelectedHorizon] = useState<AnalysisHorizon>('short');
+
   const getRatingBadge = (rating: string) => {
     switch (rating) {
       case 'STRONG_BUY':
@@ -61,9 +69,9 @@ export const TechnicalSummary: React.FC<TechnicalSummaryProps> = ({
         };
       default:
         return {
-          label: lang === 'cz' ? 'NEUTRÁLNÍ' : 'NEUTRAL',
-          bg: 'bg-slate-800 border-slate-700 text-slate-300',
-          color: '#94a3b8',
+          label: lang === 'cz' ? 'VYČKAT / DRŽET' : 'HOLD / NEUTRAL',
+          bg: 'bg-amber-500/10 border-amber-500/30 text-amber-300',
+          color: '#fbbf24',
         };
     }
   };
@@ -72,13 +80,18 @@ export const TechnicalSummary: React.FC<TechnicalSummaryProps> = ({
   const oscRating = getRatingBadge(gauge.oscillators.rating);
   const maRating = getRatingBadge(gauge.movingAverages.rating);
 
+  const activeRec = selectedHorizon === 'short' ? shortTermRec : longTermRec;
+  const activeRecBadge = getRatingBadge(activeRec.action);
+  const shortBadge = getRatingBadge(shortTermRec.action);
+  const longBadge = getRatingBadge(longTermRec.action);
+
   // Meter gauge calculation (-100 to 100 maps to 0% to 100%)
   const gaugePercent = Math.min(100, Math.max(0, ((gauge.score + 100) / 200) * 100));
 
   return (
     <div className="flex flex-col h-full bg-slate-900 border-l border-slate-800 text-slate-200 overflow-y-auto">
       {/* Header */}
-      <div className="p-4 border-b border-slate-800">
+      <div className="p-3.5 sm:p-4 border-b border-slate-800">
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
             {lang === 'cz' ? 'Technický Přehled & Signály' : 'Technical Summary & Signals'}
@@ -87,18 +100,142 @@ export const TechnicalSummary: React.FC<TechnicalSummaryProps> = ({
             TF: {timeframe}
           </span>
         </div>
-        <div className="flex items-baseline gap-2 mt-2">
-          <span className="text-xl font-bold tracking-tight text-white">{ticker.symbol}</span>
-          <span className="text-xs text-slate-400">{ticker.sector}</span>
+        <div className="flex items-baseline gap-2 mt-1.5">
+          <span className="text-lg sm:text-xl font-bold tracking-tight text-white">{ticker.symbol}</span>
+          <span className="text-xs text-slate-400 truncate">{ticker.sector}</span>
         </div>
       </div>
 
-      <div className="p-4 space-y-6">
+      <div className="p-3.5 sm:p-4 space-y-4">
+        {/* Buy / Sell Horizon Recommendations (Short-Term vs Long-Term) */}
+        <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800/90 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-300">
+              {lang === 'cz' ? 'Doporučení dle horizontu' : 'Horizon Buy / Sell Signal'}
+            </span>
+            <span className="text-[10px] font-mono text-slate-400">
+              {activeRec.timeframeLabel}
+            </span>
+          </div>
+
+          {/* Dual Quick Overview Selector Cards */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedHorizon('short')}
+              className={`text-left p-2.5 rounded-lg border transition-all ${
+                selectedHorizon === 'short'
+                  ? 'bg-slate-900 border-emerald-500/60 ring-1 ring-emerald-500/30'
+                  : 'bg-slate-900/50 border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
+                <span className="flex items-center gap-1 font-medium">
+                  <Clock className="w-3 h-3 text-sky-400" />
+                  {lang === 'cz' ? 'Krátký úsek' : 'Short-Term'}
+                </span>
+                <span className="font-mono">{shortTermRec.score > 0 ? `+${shortTermRec.score}` : shortTermRec.score}</span>
+              </div>
+              <div className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded border ${shortBadge.bg}`}>
+                {shortBadge.label}
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedHorizon('long')}
+              className={`text-left p-2.5 rounded-lg border transition-all ${
+                selectedHorizon === 'long'
+                  ? 'bg-slate-900 border-emerald-500/60 ring-1 ring-emerald-500/30'
+                  : 'bg-slate-900/50 border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
+                <span className="flex items-center gap-1 font-medium">
+                  <TrendingUp className="w-3 h-3 text-emerald-400" />
+                  {lang === 'cz' ? 'Dlouhý úsek' : 'Long-Term'}
+                </span>
+                <span className="font-mono">{longTermRec.score > 0 ? `+${longTermRec.score}` : longTermRec.score}</span>
+              </div>
+              <div className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded border ${longBadge.bg}`}>
+                {longBadge.label}
+              </div>
+            </button>
+          </div>
+
+          {/* Selected Horizon Detail Box */}
+          <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 space-y-2 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-slate-400">
+                {selectedHorizon === 'short'
+                  ? lang === 'cz'
+                    ? 'Krátkodobý výhled (1–5 dní)'
+                    : 'Short-Term Outlook (1–5d)'
+                  : lang === 'cz'
+                  ? 'Dlouhodobý výhled (1–6 měsíců)'
+                  : 'Long-Term Outlook (1–6m)'}
+              </span>
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded border ${activeRecBadge.bg}`}>
+                {activeRecBadge.label} ({activeRec.confidence}%)
+              </span>
+            </div>
+
+            {/* Target & Stop-Loss Price Grid */}
+            <div className="grid grid-cols-3 gap-1.5 pt-1 font-mono text-[10px]">
+              <div className="p-1.5 rounded bg-slate-950 border border-slate-800">
+                <div className="text-slate-500">{lang === 'cz' ? 'Vstup' : 'Entry'}</div>
+                <div className="text-slate-100 font-bold">{formatPriceCompact(activeRec.entryPrice, ticker.currency)}</div>
+              </div>
+              <div className="p-1.5 rounded bg-slate-950 border border-emerald-500/20">
+                <div className="flex items-center gap-0.5 text-emerald-400">
+                  <Target className="w-2.5 h-2.5" />
+                  <span>{lang === 'cz' ? 'Cíl' : 'Target'}</span>
+                </div>
+                <div className="text-emerald-300 font-bold">{formatPriceCompact(activeRec.targetPrice, ticker.currency)}</div>
+              </div>
+              <div className="p-1.5 rounded bg-slate-950 border border-rose-500/20">
+                <div className="flex items-center gap-0.5 text-rose-400">
+                  <ShieldAlert className="w-2.5 h-2.5" />
+                  <span>SL</span>
+                </div>
+                <div className="text-rose-300 font-bold">{formatPriceCompact(activeRec.stopLoss, ticker.currency)}</div>
+              </div>
+            </div>
+
+            {/* Top Technical Reasons */}
+            <ul className="space-y-1 text-[11px] text-slate-300 pt-1">
+              {(lang === 'cz' ? activeRec.reasons : activeRec.reasonsEn).map((reason, idx) => (
+                <li key={idx} className="flex items-start gap-1.5">
+                  <span className="text-emerald-400 mt-0.5">•</span>
+                  <span>{reason}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* AI Analysis CTA Button for Selected Horizon */}
+          <button
+            onClick={() => onOpenAIAnalysis(selectedHorizon)}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all transform active:scale-98"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>
+              {lang === 'cz'
+                ? selectedHorizon === 'short'
+                  ? 'AI Analýza: Krátký úsek'
+                  : 'AI Analýza: Dlouhodobý úsek'
+                : selectedHorizon === 'short'
+                ? 'AI Analysis: Short-Term'
+                : 'AI Analysis: Long-Term'}
+            </span>
+          </button>
+        </div>
+
         {/* Main Quantitative Gauge Meter */}
         <div className="p-4 rounded-xl bg-slate-950 border border-slate-800/80">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-medium text-slate-400">
-              {lang === 'cz' ? 'Celkový Kvantitativní Signál' : 'Overall Quantitative Signal'}
+              {lang === 'cz' ? `Signál grafu (${timeframe})` : `Chart Gauge (${timeframe})`}
             </span>
             <span className={`text-xs font-bold px-2 py-0.5 rounded border ${overall.bg}`}>
               {overall.label}
@@ -147,15 +284,6 @@ export const TechnicalSummary: React.FC<TechnicalSummaryProps> = ({
             </div>
           </div>
         </div>
-
-        {/* AI Analysis CTA Button */}
-        <button
-          onClick={onOpenAIAnalysis}
-          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all transform active:scale-98"
-        >
-          <Sparkles className="w-4 h-4" />
-          <span>{lang === 'cz' ? 'AI Analýza & Kvantitativní Rozbor' : 'Gemini AI Quantitative Analysis'}</span>
-        </button>
 
         {/* Live Indicator Snapshot */}
         <div className="space-y-2">

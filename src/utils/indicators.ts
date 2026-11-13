@@ -1,4 +1,4 @@
-import { Candle, TechnicalIndicatorValues, TechnicalGaugeSummary } from '../types/market';
+import { Candle, TechnicalIndicatorValues, TechnicalGaugeSummary, AnalysisHorizon, HorizonRecommendation } from '../types/market';
 
 /**
  * Simple Moving Average (SMA)
@@ -538,5 +538,242 @@ export function evaluateTechnicalGauge(candles: Candle[]): {
       vwap: lastVWAP,
       superTrend: lastST,
     },
+  };
+}
+
+/**
+ * Evaluates dedicated Buy/Sell recommendation for either Short-Term (intraday/swing 1-5d)
+ * or Long-Term (multi-week/month trend) horizon.
+ */
+export function evaluateHorizonRecommendation(
+  candles: Candle[],
+  horizon: AnalysisHorizon,
+  livePrice?: number
+): HorizonRecommendation {
+  if (!candles || candles.length === 0) {
+    const fallbackPrice = livePrice && livePrice > 0 ? livePrice : 100;
+    return {
+      horizon,
+      action: 'HOLD',
+      score: 0,
+      confidence: 50,
+      entryPrice: fallbackPrice,
+      targetPrice: fallbackPrice,
+      stopLoss: fallbackPrice,
+      riskReward: '1 : 2.0',
+      timeframeLabel: horizon === 'short' ? '15m / 1h' : '1D / 1W',
+      reasons: ['Nedostatek dat pro výpočet signálu'],
+      reasonsEn: ['Insufficient candle data for signal calculation'],
+    };
+  }
+
+  const closes = candles.map((c) => c.close);
+  const lastIndex = candles.length - 1;
+  const currentPrice = livePrice && livePrice > 0 ? livePrice : closes[lastIndex];
+
+  const sma20Arr = calculateSMA(closes, 20);
+  const sma50Arr = calculateSMA(closes, 50);
+  const sma200Arr = calculateSMA(closes, Math.min(200, Math.max(60, Math.floor(closes.length * 0.85))));
+  const ema9Arr = calculateEMA(closes, 9);
+  const ema21Arr = calculateEMA(closes, 21);
+  const rsiArr = calculateRSI(closes, 14);
+  const macd = calculateMACD(closes, 12, 26, 9);
+  const stoch = calculateStochastic(candles, 14, 3);
+  const atrArr = calculateATR(candles, 14);
+  const vwapArr = calculateVWAP(candles);
+  const superTrend = calculateSuperTrend(candles, 10, 3);
+
+  const sma20 = sma20Arr[lastIndex] ?? currentPrice;
+  const sma50 = sma50Arr[lastIndex] ?? currentPrice;
+  const sma200 = sma200Arr[lastIndex] ?? sma50;
+  const ema9 = ema9Arr[lastIndex] ?? currentPrice;
+  const ema21 = ema21Arr[lastIndex] ?? currentPrice;
+  const rsi = rsiArr[lastIndex] ?? 50;
+  const macdHist = macd.histogram[lastIndex] ?? 0;
+  const macdLine = macd.macd[lastIndex] ?? 0;
+  const macdSignal = macd.signal[lastIndex] ?? 0;
+  const stochK = stoch.k[lastIndex] ?? 50;
+  const stochD = stoch.d[lastIndex] ?? 50;
+  const atr = atrArr[lastIndex] ?? currentPrice * (horizon === 'short' ? 0.015 : 0.03);
+  const vwap = vwapArr[lastIndex] ?? currentPrice;
+  const stTrend = superTrend.directions[lastIndex] ?? 'up';
+
+  let score = 0;
+  const reasons: string[] = [];
+  const reasonsEn: string[] = [];
+
+  if (horizon === 'short') {
+    // 1. Fast EMA 9/21 trend alignment (+/- 25)
+    if (currentPrice > ema9 && ema9 > ema21) {
+      score += 25;
+      reasons.push('Cena nad EMA 9 a EMA 21 potvrzuje krátkodobé nákupní momentum');
+      reasonsEn.push('Price above EMA 9 & EMA 21 confirms short-term bullish momentum');
+    } else if (currentPrice < ema9 && ema9 < ema21) {
+      score -= 25;
+      reasons.push('Cena pod EMA 9 a EMA 21 značí krátkodobý prodejní tlak');
+      reasonsEn.push('Price below EMA 9 & EMA 21 signals short-term selling pressure');
+    } else if (currentPrice > ema21) {
+      score += 10;
+    } else {
+      score -= 10;
+    }
+
+    // 2. SuperTrend (+/- 20)
+    if (stTrend === 'up') {
+      score += 20;
+      reasons.push('SuperTrend drží býčí intradenní strukturu');
+      reasonsEn.push('SuperTrend remains in bullish intraday structure');
+    } else {
+      score -= 20;
+      reasons.push('SuperTrend signalizuje medvědí krátkodobý trend');
+      reasonsEn.push('SuperTrend indicates bearish short-term direction');
+    }
+
+    // 3. MACD momentum (+/- 20)
+    if (macdHist > 0 && macdLine >= macdSignal) {
+      score += 20;
+      reasons.push(`Kladný MACD histogram (${macdHist.toFixed(2)}) podporuje růst`);
+      reasonsEn.push(`Positive MACD histogram (${macdHist.toFixed(2)}) supports upside`);
+    } else if (macdHist < 0 && macdLine <= macdSignal) {
+      score -= 20;
+      reasons.push(`Záporný MACD histogram (${macdHist.toFixed(2)}) potvrzuje pokles`);
+      reasonsEn.push(`Negative MACD histogram (${macdHist.toFixed(2)}) confirms downside`);
+    }
+
+    // 4. RSI & Stochastic mean reversion / momentum (+/- 25)
+    if (rsi < 35) {
+      score += 18;
+      reasons.push(`RSI (${rsi.toFixed(1)}) v přeprodané zóně nahrává odrazu`);
+      reasonsEn.push(`RSI (${rsi.toFixed(1)}) in oversold zone favors bounce`);
+    } else if (rsi > 72) {
+      score -= 18;
+      reasons.push(`RSI (${rsi.toFixed(1)}) značí překoupenost a riziko korekce`);
+      reasonsEn.push(`RSI (${rsi.toFixed(1)}) signals overbought pullback risk`);
+    } else if (rsi >= 52) {
+      score += 8;
+    } else if (rsi <= 48) {
+      score -= 8;
+    }
+
+    if (stochK < 25 && stochK >= stochD) {
+      score += 10;
+    } else if (stochK > 78 && stochK <= stochD) {
+      score -= 10;
+    }
+
+    // 5. VWAP anchor (+/- 10)
+    if (currentPrice > vwap) {
+      score += 10;
+    } else if (currentPrice < vwap) {
+      score -= 10;
+    }
+  } else {
+    // LONG-TERM HORIZON (1D/1W multi-week/month trend)
+    // 1. Price vs SMA 50 & SMA 200 (+/- 30)
+    if (currentPrice > sma50 && currentPrice > sma200) {
+      score += 30;
+      reasons.push('Cena nad SMA 50 i SMA 200 potvrzuje silný dlouhodobý růstový trend');
+      reasonsEn.push('Price above both SMA 50 & SMA 200 confirms primary uptrend');
+    } else if (currentPrice < sma50 && currentPrice < sma200) {
+      score -= 30;
+      reasons.push('Cena pod SMA 50 i SMA 200 indikuje dlouhodobý klesající trend');
+      reasonsEn.push('Price below SMA 50 & SMA 200 signals primary downtrend');
+    } else if (currentPrice > sma200) {
+      score += 12;
+      reasons.push('Cena drží dlouhodobou podporu nad SMA 200');
+      reasonsEn.push('Price holds long-term support above SMA 200');
+    } else {
+      score -= 12;
+      reasons.push('Cena zůstává pod klíčovým dlouhodobým průměrem SMA 200');
+      reasonsEn.push('Price remains below key long-term SMA 200');
+    }
+
+    // 2. Golden Cross / Death Cross (SMA 50 vs SMA 200) (+/- 25)
+    if (sma50 > sma200 * 1.005) {
+      score += 25;
+      reasons.push('SMA 50 nad SMA 200 (Golden Cross struktura)');
+      reasonsEn.push('SMA 50 above SMA 200 (Golden Cross structure)');
+    } else if (sma50 < sma200 * 0.995) {
+      score -= 25;
+      reasons.push('SMA 50 pod SMA 200 (Death Cross struktura)');
+      reasonsEn.push('SMA 50 below SMA 200 (Death Cross structure)');
+    }
+
+    // 3. Multi-bar trend slope (last 20 vs 60 bars) (+/- 15)
+    const lookbackIdx = Math.max(0, lastIndex - 20);
+    const slopePct = closes[lookbackIdx] > 0 ? ((currentPrice - closes[lookbackIdx]) / closes[lookbackIdx]) * 100 : 0;
+    if (slopePct > 3) {
+      score += 15;
+    } else if (slopePct < -3) {
+      score -= 15;
+    }
+
+    // 4. Daily MACD structural trend (+/- 15)
+    if (macdLine > 0 && macdHist >= 0) {
+      score += 15;
+      reasons.push('Denní MACD v kladném pásmu potvrzuje dlouhodobou akumulaci');
+      reasonsEn.push('Daily MACD in positive territory confirms accumulation');
+    } else if (macdLine < 0 && macdHist <= 0) {
+      score -= 15;
+      reasons.push('Denní MACD v záporném pásmu potvrzuje distribuci');
+      reasonsEn.push('Daily MACD in negative territory confirms distribution');
+    }
+
+    // 5. Daily RSI health (+/- 15)
+    if (rsi >= 50 && rsi <= 70) {
+      score += 15;
+    } else if (rsi < 35) {
+      score += 10;
+      reasons.push(`Denní RSI (${rsi.toFixed(1)}) je hluboko přeprodané – hodnota pro dlouhodobý vstup`);
+      reasonsEn.push(`Daily RSI (${rsi.toFixed(1)}) deeply oversold – value entry zone`);
+    } else if (rsi > 75) {
+      score -= 10;
+    } else if (rsi < 45) {
+      score -= 15;
+    }
+
+    if (currentPrice > sma20) score += 5;
+    else score -= 5;
+  }
+
+  const clampedScore = Math.max(-100, Math.min(100, Math.round(score)));
+  let action: HorizonRecommendation['action'] = 'HOLD';
+  if (clampedScore >= 40) action = 'STRONG_BUY';
+  else if (clampedScore >= 15) action = 'BUY';
+  else if (clampedScore <= -40) action = 'STRONG_SELL';
+  else if (clampedScore <= -15) action = 'SELL';
+
+  const isBearish = clampedScore < 0;
+  const targetMult = horizon === 'short' ? 2.2 : 4.2;
+  const stopMult = horizon === 'short' ? 1.1 : 2.1;
+
+  const targetPrice = Number(
+    (isBearish ? Math.max(0.01, currentPrice - atr * targetMult) : currentPrice + atr * targetMult).toFixed(2)
+  );
+  const stopLoss = Number(
+    (isBearish ? currentPrice + atr * stopMult : Math.max(0.01, currentPrice - atr * stopMult)).toFixed(2)
+  );
+
+  const reward = Math.abs(targetPrice - currentPrice);
+  const risk = Math.max(0.01, Math.abs(currentPrice - stopLoss));
+  const rr = (reward / risk).toFixed(1);
+
+  if (reasons.length === 0) {
+    reasons.push('Smíšené signály indikátorů – trh konsoliduje v neutrálním pásmu');
+    reasonsEn.push('Mixed indicator signals – market consolidating in neutral range');
+  }
+
+  return {
+    horizon,
+    action,
+    score: clampedScore,
+    confidence: Math.min(94, Math.max(54, 52 + Math.round(Math.abs(clampedScore) * 0.42))),
+    entryPrice: Number(currentPrice.toFixed(2)),
+    targetPrice,
+    stopLoss,
+    riskReward: `1 : ${rr}`,
+    timeframeLabel: horizon === 'short' ? '15m / 1h (1–5d)' : '1D / 1W (1–6m)',
+    reasons: reasons.slice(0, 3),
+    reasonsEn: reasonsEn.slice(0, 3),
   };
 }

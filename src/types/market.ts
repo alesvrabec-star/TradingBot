@@ -22,6 +22,7 @@ export interface Ticker {
   currency: string;
   exchange: string;
   sector: string;
+  marketSession?: 'pre' | 'regular' | 'post';
 }
 
 export interface IndicatorConfig {
@@ -143,6 +144,22 @@ export interface TechnicalGaugeSummary {
     classic: { p: number; s1: number; s2: number; s3: number; r1: number; r2: number; r3: number };
     fibonacci: { p: number; s1: number; s2: number; s3: number; r1: number; r2: number; r3: number };
   };
+}
+
+export type AnalysisHorizon = 'short' | 'long';
+
+export interface HorizonRecommendation {
+  horizon: AnalysisHorizon;
+  action: 'STRONG_BUY' | 'BUY' | 'HOLD' | 'SELL' | 'STRONG_SELL';
+  score: number; // -100 to +100
+  confidence: number; // 0 to 100
+  entryPrice: number;
+  targetPrice: number;
+  stopLoss: number;
+  riskReward: string;
+  timeframeLabel: string;
+  reasons: string[];
+  reasonsEn: string[];
 }
 
 export interface AIAnalysisResult {

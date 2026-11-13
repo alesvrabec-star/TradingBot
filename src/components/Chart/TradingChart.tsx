@@ -6,6 +6,7 @@ import {
   ChartDrawing,
   DrawingTool,
   Ticker,
+  Timeframe,
 } from '../../types/market';
 import {
   calculateSMA,
@@ -41,6 +42,7 @@ import {
 interface TradingChartProps {
   candles: Candle[];
   ticker: Ticker;
+  timeframe: Timeframe;
   patterns: Pattern[];
   indicators: IndicatorConfig;
   onUpdateIndicators: (config: Partial<IndicatorConfig>) => void;
@@ -55,6 +57,7 @@ interface TradingChartProps {
 export const TradingChart: React.FC<TradingChartProps> = ({
   candles,
   ticker,
+  timeframe,
   patterns,
   indicators,
   onUpdateIndicators,
@@ -219,13 +222,22 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       }
     }
 
-    // Add 4% padding
+    // Ensure live ticker price is visible on the scale (e.g. pre-market gap on 1D chart)
+    if (ticker.price > 0 && min < Infinity && max > -Infinity) {
+      const span = max - min || max * 0.1;
+      if (Math.abs(ticker.price - max) < span * 1.5 && Math.abs(ticker.price - min) < span * 1.5) {
+        if (ticker.price > max) max = ticker.price;
+        if (ticker.price < min) min = ticker.price;
+      }
+    }
+
+    // Add 5% padding
     const padding = (max - min) * 0.05 || 1;
     return {
       min: min - padding,
       max: max + padding,
     };
-  }, [visibleCandles, startIndex, indicators.showBollinger, bollinger]);
+  }, [visibleCandles, startIndex, indicators.showBollinger, bollinger, ticker.price]);
 
   // Transform coordinates helper
   const getX = useCallback(
@@ -307,8 +319,11 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       ctx.fillText(priceAtY.toFixed(2), layout.chartWidth + 6, y + 4);
     }
 
-    // Vertical Time Grid
-    const timeSteps = Math.max(2, Math.floor(layout.chartWidth / 120));
+    // Vertical Time Grid (date format for 1D/1W, date+time for 1h/4h, HH:mm for intraday)
+    const timeSteps = Math.max(2, Math.floor(layout.chartWidth / 110));
+    const isDailyOrWeekly = timeframe === '1D' || timeframe === '1W';
+    const isHourly = timeframe === '1h' || timeframe === '4h';
+
     for (let i = 0; i <= timeSteps; i++) {
       const candleIdx = Math.floor((visibleCandles.length / timeSteps) * i);
       if (candleIdx < visibleCandles.length) {
@@ -320,9 +335,17 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         ctx.lineTo(x, layout.mainChartBottom);
         ctx.stroke();
 
-        if (candleTime) {
+        // Skip labels too close to left/right canvas edges so text is never clipped
+        if (candleTime && x >= 26 && x <= layout.chartWidth - 26) {
           const date = new Date(candleTime * 1000);
-          const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          let timeStr: string;
+          if (isDailyOrWeekly) {
+            timeStr = `${date.getDate()}. ${date.getMonth() + 1}.`;
+          } else if (isHourly) {
+            timeStr = `${date.getDate()}.${date.getMonth() + 1}. ${date.getHours().toString().padStart(2, '0')}:00`;
+          } else {
+            timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          }
           ctx.fillStyle = '#64748b';
           ctx.font = '10px "JetBrains Mono", monospace';
           ctx.textAlign = 'center';
@@ -619,11 +642,14 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       }
     });
 
-    // 7. Active Live Price Line & Right Axis Tag
+    // 7. Active Live Price Line & Right Axis Tag (reflects real live ticker.price including pre/post-market)
     const latestCandle = candles[candles.length - 1];
     if (latestCandle) {
-      const currentY = getY(latestCandle.close);
-      const isUp = latestCandle.close >= latestCandle.open;
+      const livePrice = ticker.price > 0 ? ticker.price : latestCandle.close;
+      const currentY = Math.max(layout.mainChartTop + 10, Math.min(layout.mainChartBottom - 10, getY(livePrice)));
+      const isUp = ticker.marketSession && ticker.marketSession !== 'regular'
+        ? ticker.change >= 0
+        : livePrice >= latestCandle.open;
       const tagBg = isUp ? '#10b981' : '#ef4444';
 
       ctx.beginPath();
@@ -635,13 +661,13 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Flashing Price Tag on axis
+      // Price Tag on Y-axis
       ctx.fillStyle = tagBg;
       ctx.fillRect(layout.chartWidth, currentY - 10, layout.rightMargin, 20);
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 11px "JetBrains Mono", monospace';
       ctx.textAlign = 'left';
-      ctx.fillText(` ${formatPriceCompact(latestCandle.close, ticker.currency)}`, layout.chartWidth + 3, currentY + 4);
+      ctx.fillText(` ${formatPriceCompact(livePrice, ticker.currency)}`, layout.chartWidth + 3, currentY + 4);
     }
 
     // 8. Subchart Rendering (RSI / MACD / Stochastic / Volume)
@@ -842,17 +868,21 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         ctx.fillText(` ${formatPriceCompact(hoveredPrice, ticker.currency)}`, layout.chartWidth + 3, mousePos.y + 4);
       }
 
-      // Time box on X-axis
+      // Time box on X-axis (clamped inside chartWidth so badge never clips)
       const hoveredTime = getTimeFromX(mousePos.x);
       if (hoveredTime) {
         const d = new Date(hoveredTime * 1000);
-        const timeBadge = `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        const timeBadge = isDailyOrWeekly
+          ? d.toLocaleDateString()
+          : `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        const badgeW = isDailyOrWeekly ? 86 : 114;
+        const badgeX = Math.max(badgeW / 2 + 2, Math.min(layout.chartWidth - badgeW / 2 - 2, mousePos.x));
         ctx.fillStyle = '#334155';
-        ctx.fillRect(mousePos.x - 55, layout.height - layout.bottomMargin, 110, 20);
+        ctx.fillRect(badgeX - badgeW / 2, layout.height - layout.bottomMargin, badgeW, 20);
         ctx.fillStyle = '#f8fafc';
         ctx.font = '10px "JetBrains Mono", monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(timeBadge, mousePos.x, layout.height - layout.bottomMargin + 14);
+        ctx.fillText(timeBadge, badgeX, layout.height - layout.bottomMargin + 14);
       }
     }
   }, [
@@ -881,6 +911,11 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     showPatternMarkers,
     drawings,
     mousePos,
+    ticker.price,
+    ticker.change,
+    ticker.currency,
+    ticker.marketSession,
+    timeframe,
   ]);
 
   // Handle Mouse Hover & Pan

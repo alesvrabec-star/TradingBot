@@ -7,6 +7,8 @@ import {
   AIAnalysisResult,
   Timeframe,
   Pattern,
+  AnalysisHorizon,
+  HorizonRecommendation,
 } from '../../types/market';
 import {
   Sparkles,
@@ -15,10 +17,9 @@ import {
   TrendingDown,
   ShieldAlert,
   Target,
-  BarChart2,
   CheckCircle2,
   RefreshCw,
-  AlertTriangle,
+  Clock,
 } from 'lucide-react';
 import { formatPriceCompact } from '../../utils/formatters';
 
@@ -31,6 +32,10 @@ interface GeminiAnalysisModalProps {
   gauge: TechnicalGaugeSummary;
   indicators: TechnicalIndicatorValues;
   patterns: Pattern[];
+  horizon: AnalysisHorizon;
+  onChangeHorizon: (horizon: AnalysisHorizon) => void;
+  shortTermRec: HorizonRecommendation;
+  longTermRec: HorizonRecommendation;
   lang: 'cz' | 'en';
 }
 
@@ -43,11 +48,17 @@ export const GeminiAnalysisModal: React.FC<GeminiAnalysisModalProps> = ({
   gauge,
   indicators,
   patterns,
+  horizon,
+  onChangeHorizon,
+  shortTermRec,
+  longTermRec,
   lang,
 }) => {
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState<AIAnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const activeHorizonRec = horizon === 'short' ? shortTermRec : longTermRec;
 
   const fetchAnalysis = async () => {
     setLoading(true);
@@ -62,6 +73,8 @@ export const GeminiAnalysisModal: React.FC<GeminiAnalysisModalProps> = ({
           currentPrice: ticker.price,
           currency: ticker.currency,
           timeframe,
+          horizon,
+          horizonRec: activeHorizonRec,
           gauge,
           indicators,
           recentPatterns: patterns.slice(-5),
@@ -140,37 +153,45 @@ export const GeminiAnalysisModal: React.FC<GeminiAnalysisModalProps> = ({
     if (isOpen) {
       fetchAnalysis();
     }
-  }, [isOpen, ticker.symbol, timeframe]);
+  }, [isOpen, ticker.symbol, timeframe, horizon]);
 
   if (!isOpen) return null;
 
+  const getShortActionLabel = (act: HorizonRecommendation['action']) => {
+    if (act === 'STRONG_BUY') return lang === 'cz' ? 'SILNÝ NÁKUP' : 'STRONG BUY';
+    if (act === 'BUY') return lang === 'cz' ? 'NÁKUP' : 'BUY';
+    if (act === 'STRONG_SELL') return lang === 'cz' ? 'SILNÝ PRODEJ' : 'STRONG SELL';
+    if (act === 'SELL') return lang === 'cz' ? 'PRODEJ' : 'SELL';
+    return lang === 'cz' ? 'VYČKAT' : 'HOLD';
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
-      <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+      <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh]">
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-slate-800 bg-slate-950/70">
+        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-800 bg-slate-950/70">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-white tracking-tight">
-                  {lang === 'cz' ? 'Kvantitativní AI Analýza Trhu' : 'Quantitative AI Market Analysis'}
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm sm:text-base font-bold text-white tracking-tight">
+                  {lang === 'cz' ? 'Technické Doporučení & AI Analýza' : 'Technical Recommendation & AI Analysis'}
                 </h3>
                 <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300">
                   {ticker.symbol} · {timeframe}
                 </span>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
                 {lang === 'cz'
-                  ? 'Hloubkový rozbor tržní struktury, supportů, rezistencí a rizikového profilu'
-                  : 'Deep market structure analysis, support/resistance, and risk parameters'}
+                  ? 'Vyberte investiční horizont pro doporučení Nákup / Prodej, cíle a Stop-Loss'
+                  : 'Choose horizon for Buy / Sell recommendation, price targets, and Stop-Loss'}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={fetchAnalysis}
               disabled={loading}
@@ -188,8 +209,73 @@ export const GeminiAnalysisModal: React.FC<GeminiAnalysisModalProps> = ({
           </div>
         </div>
 
+        {/* Short-Term vs Long-Term Horizon Selector Bar */}
+        <div className="grid grid-cols-2 gap-2 px-4 sm:px-5 py-2.5 bg-slate-950/90 border-b border-slate-800 shrink-0">
+          <button
+            type="button"
+            onClick={() => onChangeHorizon('short')}
+            className={`flex items-center justify-between gap-2 p-2.5 rounded-xl border text-left transition-all ${
+              horizon === 'short'
+                ? 'bg-slate-900 border-emerald-500/60 ring-1 ring-emerald-500/30'
+                : 'bg-slate-900/40 border-slate-800 hover:border-slate-700'
+            }`}
+          >
+            <div>
+              <div className="flex items-center gap-1.5 text-xs font-bold text-white">
+                <Clock className="w-3.5 h-3.5 text-sky-400" />
+                <span>{lang === 'cz' ? 'Krátký úsek' : 'Short-Term'}</span>
+              </div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                {lang === 'cz' ? 'Intradenní / 1–5 dní' : 'Intraday / 1–5 days'}
+              </div>
+            </div>
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded border shrink-0 ${
+                shortTermRec.action.includes('BUY')
+                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+                  : shortTermRec.action.includes('SELL')
+                  ? 'bg-rose-500/20 border-rose-500/40 text-rose-400'
+                  : 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+              }`}
+            >
+              {getShortActionLabel(shortTermRec.action)}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onChangeHorizon('long')}
+            className={`flex items-center justify-between gap-2 p-2.5 rounded-xl border text-left transition-all ${
+              horizon === 'long'
+                ? 'bg-slate-900 border-emerald-500/60 ring-1 ring-emerald-500/30'
+                : 'bg-slate-900/40 border-slate-800 hover:border-slate-700'
+            }`}
+          >
+            <div>
+              <div className="flex items-center gap-1.5 text-xs font-bold text-white">
+                <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{lang === 'cz' ? 'Dlouhodobý úsek' : 'Long-Term'}</span>
+              </div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                {lang === 'cz' ? 'Trendový / 1–6 měsíců' : 'Trend / 1–6 months'}
+              </div>
+            </div>
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded border shrink-0 ${
+                longTermRec.action.includes('BUY')
+                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+                  : longTermRec.action.includes('SELL')
+                  ? 'bg-rose-500/20 border-rose-500/40 text-rose-400'
+                  : 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+              }`}
+            >
+              {getShortActionLabel(longTermRec.action)}
+            </span>
+          </button>
+        </div>
+
         {/* Content */}
-        <div className="p-6 overflow-y-auto space-y-6 flex-1 text-slate-200 text-xs">
+        <div className="p-4 sm:p-6 overflow-y-auto space-y-5 flex-1 text-slate-200 text-xs">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-16 space-y-3">
               <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
@@ -205,21 +291,33 @@ export const GeminiAnalysisModal: React.FC<GeminiAnalysisModalProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-xl bg-slate-950 border border-slate-800/80">
                 <div className="flex flex-col justify-center">
                   <span className="text-[11px] text-slate-400 uppercase tracking-wider">
-                    {lang === 'cz' ? 'Tržní Bias (Směr)' : 'Market Bias'}
+                    {lang === 'cz'
+                      ? horizon === 'short'
+                        ? 'Doporučení (Krátký úsek)'
+                        : 'Doporučení (Dlouhý úsek)'
+                      : horizon === 'short'
+                      ? 'Recommendation (Short-Term)'
+                      : 'Recommendation (Long-Term)'}
                   </span>
                   <div className="flex items-center gap-1.5 mt-1 font-bold text-base">
                     {analysis.bias === 'BULLISH' ? (
                       <>
                         <TrendingUp className="w-4 h-4 text-emerald-400" />
-                        <span className="text-emerald-400">BÝČÍ (BULLISH)</span>
+                        <span className="text-emerald-400">
+                          {lang === 'cz' ? 'NÁKUP (BULLISH)' : 'BUY (BULLISH)'}
+                        </span>
                       </>
                     ) : analysis.bias === 'BEARISH' ? (
                       <>
                         <TrendingDown className="w-4 h-4 text-rose-400" />
-                        <span className="text-rose-400">MEDVĚDÍ (BEARISH)</span>
+                        <span className="text-rose-400">
+                          {lang === 'cz' ? 'PRODEJ (BEARISH)' : 'SELL (BEARISH)'}
+                        </span>
                       </>
                     ) : (
-                      <span className="text-slate-300">NEUTRÁLNÍ (KONSOLIDACE)</span>
+                      <span className="text-amber-300">
+                        {lang === 'cz' ? 'VYČKAT / DRŽET' : 'HOLD / NEUTRAL'}
+                      </span>
                     )}
                   </div>
                 </div>

@@ -131,13 +131,14 @@ const DEFAULT_SYMBOLS_METADATA: Record<string, { name: string; sector: string }>
   GOOGL: { name: 'Alphabet Inc.', sector: 'Digital Advertising & AI' },
 };
 
-async function fetchYahooChart(symbol: string, interval: string, range: string) {
+async function fetchYahooChart(symbol: string, interval: string, range: string, includePrePost = false) {
   const hosts = [
     'https://query1.finance.yahoo.com',
     'https://query2.finance.yahoo.com',
   ];
 
   let lastError: Error | null = null;
+  const prePostParam = includePrePost ? '&includePrePost=true' : '';
 
   // Attempt 1: direct (or with cached crumb if already present)
   const cachedAuth = yahooAuthCache && Date.now() - yahooAuthCache.timestamp < 15 * 60 * 1000 ? yahooAuthCache : null;
@@ -145,7 +146,7 @@ async function fetchYahooChart(symbol: string, interval: string, range: string) 
   for (const host of hosts) {
     try {
       const crumbParam = cachedAuth ? `&crumb=${encodeURIComponent(cachedAuth.crumb)}` : '';
-      const url = `${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}${crumbParam}`;
+      const url = `${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}${prePostParam}${crumbParam}`;
       const headers: Record<string, string> = {
         'User-Agent': BROWSER_UA,
         Accept: 'application/json, text/plain, */*',
@@ -180,7 +181,7 @@ async function fetchYahooChart(symbol: string, interval: string, range: string) 
   if (freshAuth) {
     for (const host of hosts) {
       try {
-        const url = `${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&crumb=${encodeURIComponent(freshAuth.crumb)}`;
+        const url = `${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}${prePostParam}&crumb=${encodeURIComponent(freshAuth.crumb)}`;
         const response = await fetch(url, {
           headers: {
             'User-Agent': BROWSER_UA,
@@ -208,6 +209,71 @@ async function fetchYahooChart(symbol: string, interval: string, range: string) 
   }
 
   throw lastError || new Error(`No data returned for symbol: ${symbol}`);
+}
+
+function extractYahooQuote(symbol: string, meta: any) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const periods = meta.currentTradingPeriod;
+  let marketSession: 'pre' | 'regular' | 'post' = 'regular';
+
+  if (meta.hasPrePostMarketData && periods) {
+    if (periods.pre && nowSec >= periods.pre.start && nowSec < periods.pre.end) {
+      marketSession = 'pre';
+    } else if (periods.post && nowSec >= periods.post.start && nowSec < periods.post.end) {
+      marketSession = 'post';
+    } else if (periods.regular && nowSec < periods.regular.start) {
+      marketSession = 'pre';
+    } else if (periods.regular && nowSec > periods.regular.end) {
+      marketSession = 'post';
+    }
+  }
+
+  const regularPrice = meta.regularMarketPrice ?? meta.chartPreviousClose ?? 100;
+  const hasExtendedPrice =
+    meta.hasPrePostMarketData &&
+    typeof meta.fulldayPrice === 'number' &&
+    meta.fulldayPrice > 0 &&
+    marketSession !== 'regular';
+
+  const currentPrice = Number((hasExtendedPrice ? meta.fulldayPrice : regularPrice).toFixed(2));
+  const prevClose = meta.regularMarketPreviousClose ?? meta.previousClose ?? meta.chartPreviousClose ?? regularPrice;
+
+  let change: number;
+  let changePercent: number;
+
+  if (hasExtendedPrice && typeof meta.fulldayChange === 'number' && typeof meta.fulldayChangePercent === 'number') {
+    change = Number(meta.fulldayChange.toFixed(2));
+    changePercent = Number(meta.fulldayChangePercent.toFixed(2));
+  } else if (typeof meta.fulldayChange === 'number' && typeof meta.fulldayChangePercent === 'number' && symbol === 'BTC-USD') {
+    change = Number(meta.fulldayChange.toFixed(2));
+    changePercent = Number(meta.fulldayChangePercent.toFixed(2));
+  } else {
+    change = Number((currentPrice - prevClose).toFixed(2));
+    changePercent = Number((prevClose > 0 ? (change / prevClose) * 100 : 0).toFixed(2));
+  }
+
+  const metaInfo = DEFAULT_SYMBOLS_METADATA[symbol] || {
+    name: meta.longName || meta.shortName || symbol,
+    sector: meta.instrumentType || 'Equity',
+  };
+
+  return {
+    symbol: meta.symbol || symbol,
+    name: metaInfo.name,
+    price: currentPrice,
+    change,
+    changePercent,
+    high24h: meta.regularMarketDayHigh ?? currentPrice * 1.01,
+    low24h: meta.regularMarketDayLow ?? currentPrice * 0.99,
+    volume24h: meta.regularMarketVolume ?? 1000000,
+    currency: meta.currency || (symbol.endsWith('.PR') ? 'CZK' : 'USD'),
+    exchange: meta.exchangeName || (symbol.endsWith('.PR') ? 'PRA' : 'Global'),
+    sector: metaInfo.sector,
+    fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh ?? currentPrice * 1.2,
+    fiftyTwoWeekLow: meta.fiftyTwoWeekLow ?? currentPrice * 0.8,
+    marketSession,
+    timestamp: meta.regularMarketTime ? meta.regularMarketTime * 1000 : Date.now(),
+  };
 }
 
 async function fetchKrakenBTC(timeframe: string) {
@@ -257,39 +323,13 @@ router.get('/market/quote/:symbol', async (req: Request, res: Response) => {
   res.set('Cache-Control', 'no-store, max-age=0');
 
   const cached = quoteCache.get(cacheKey);
-  if (cached && now - cached.timestamp < 15000) {
+  if (cached && now - cached.timestamp < 8000) {
     return res.json(cached.data);
   }
 
   try {
-    const chart = await fetchYahooChart(symbol, '15m', '1d');
-    const meta = chart.meta;
-    const currentPrice = meta.regularMarketPrice ?? meta.chartPreviousClose ?? 100;
-    const prevClose = meta.regularMarketPreviousClose ?? meta.chartPreviousClose ?? currentPrice;
-    const change = Number((currentPrice - prevClose).toFixed(2));
-    const changePercent = Number((prevClose > 0 ? (change / prevClose) * 100 : 0).toFixed(2));
-
-    const metaInfo = DEFAULT_SYMBOLS_METADATA[symbol] || {
-      name: meta.longName || meta.shortName || symbol,
-      sector: meta.instrumentType || 'Equity',
-    };
-
-    const quoteData = {
-      symbol: meta.symbol || symbol,
-      name: metaInfo.name,
-      price: currentPrice,
-      change,
-      changePercent,
-      high24h: meta.regularMarketDayHigh ?? currentPrice * 1.01,
-      low24h: meta.regularMarketDayLow ?? currentPrice * 0.99,
-      volume24h: meta.regularMarketVolume ?? 1000000,
-      currency: meta.currency || (symbol.endsWith('.PR') ? 'CZK' : 'USD'),
-      exchange: meta.exchangeName || (symbol.endsWith('.PR') ? 'PRA' : 'Global'),
-      sector: metaInfo.sector,
-      fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh ?? currentPrice * 1.2,
-      fiftyTwoWeekLow: meta.fiftyTwoWeekLow ?? currentPrice * 0.8,
-      timestamp: meta.regularMarketTime ? meta.regularMarketTime * 1000 : now,
-    };
+    const chart = await fetchYahooChart(symbol, '15m', '1d', true);
+    const quoteData = extractYahooQuote(symbol, chart.meta);
 
     quoteCache.set(cacheKey, { timestamp: now, data: quoteData });
     res.json(quoteData);
@@ -307,7 +347,8 @@ router.get('/market/candles/:symbol', async (req: Request, res: Response) => {
   const now = Date.now();
 
   const cached = candleCache.get(cacheKey);
-  if (cached && now - cached.timestamp < 30000) {
+  if (cached && now - cached.timestamp < 15000) {
+    res.set('Cache-Control', 'no-store, max-age=0');
     return res.json(cached.data);
   }
 
@@ -345,8 +386,10 @@ router.get('/market/candles/:symbol', async (req: Request, res: Response) => {
       break;
   }
 
+  const includePrePost = ['1m', '5m', '15m', '1h', '4h'].includes(timeframe);
+
   try {
-    const chart = await fetchYahooChart(symbol, interval, range);
+    const chart = await fetchYahooChart(symbol, interval, range, includePrePost);
     const meta = chart.meta;
     const timestamps = chart.timestamp || [];
     const quote = chart.indicators?.quote?.[0] || {};
@@ -399,14 +442,16 @@ router.get('/market/candles/:symbol', async (req: Request, res: Response) => {
     }
 
     const candlesToReturn = finalCandles.slice(-180);
+    const quoteSummary = extractYahooQuote(symbol, meta);
 
     const payload = {
       symbol: meta.symbol || symbol,
-      currency: meta.currency || (symbol.endsWith('.PR') ? 'CZK' : 'USD'),
-      exchange: meta.exchangeName || (symbol.endsWith('.PR') ? 'PRA' : 'Global'),
+      currency: quoteSummary.currency,
+      exchange: quoteSummary.exchange,
       timeframe,
       candles: candlesToReturn,
-      lastPrice: meta.regularMarketPrice ?? (candlesToReturn[candlesToReturn.length - 1]?.close || 100),
+      lastPrice: quoteSummary.price,
+      marketSession: quoteSummary.marketSession,
       source: 'yahoo_live',
     };
 
@@ -451,37 +496,12 @@ router.get('/market/tickers', async (req: Request, res: Response) => {
         const now = Date.now();
         const cached = quoteCache.get(cacheKey);
 
-        if (cached && now - cached.timestamp < 30000) {
+        if (cached && now - cached.timestamp < 15000) {
           return cached.data;
         }
 
-        const chart = await fetchYahooChart(sym, '15m', '1d');
-        const meta = chart.meta;
-        const currentPrice = meta.regularMarketPrice ?? meta.chartPreviousClose ?? 100;
-        const prevClose = meta.regularMarketPreviousClose ?? meta.chartPreviousClose ?? currentPrice;
-        const change = Number((currentPrice - prevClose).toFixed(2));
-        const changePercent = Number((prevClose > 0 ? (change / prevClose) * 100 : 0).toFixed(2));
-
-        const metaInfo = DEFAULT_SYMBOLS_METADATA[sym] || {
-          name: meta.longName || meta.shortName || sym,
-          sector: meta.instrumentType || 'Equity',
-        };
-
-        const item = {
-          symbol: sym,
-          name: metaInfo.name,
-          price: currentPrice,
-          change,
-          changePercent,
-          high24h: meta.regularMarketDayHigh ?? currentPrice * 1.01,
-          low24h: meta.regularMarketDayLow ?? currentPrice * 0.99,
-          volume24h: meta.regularMarketVolume ?? 1000000,
-          currency: meta.currency || (sym.endsWith('.PR') ? 'CZK' : 'USD'),
-          exchange: meta.exchangeName || (sym.endsWith('.PR') ? 'PRA' : 'Global'),
-          sector: metaInfo.sector,
-          fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh ?? currentPrice * 1.2,
-          fiftyTwoWeekLow: meta.fiftyTwoWeekLow ?? currentPrice * 0.8,
-        };
+        const chart = await fetchYahooChart(sym, '15m', '1d', true);
+        const item = extractYahooQuote(sym, chart.meta);
 
         quoteCache.set(cacheKey, { timestamp: now, data: item });
         return item;
@@ -529,6 +549,8 @@ router.post('/gemini/analyze', async (req: Request, res: Response) => {
       currentPrice,
       currency = 'USD',
       timeframe,
+      horizon = 'short',
+      horizonRec,
       gauge,
       indicators,
       recentPatterns,
@@ -536,19 +558,42 @@ router.post('/gemini/analyze', async (req: Request, res: Response) => {
     } = req.body;
 
     const currLabel = currency.toUpperCase() === 'CZK' ? 'Kč' : currency.toUpperCase() === 'EUR' ? '€' : '$';
+    const horizonLabel =
+      horizon === 'long'
+        ? lang === 'cz'
+          ? 'Dlouhodobý úsek (1–6 měsíců, denní/týdenní struktura SMA 50/200)'
+          : 'Long-Term Horizon (1–6 months, Daily/Weekly SMA 50/200 trend)'
+        : lang === 'cz'
+        ? 'Krátkodobý úsek (1–5 dní, intradenní momentum EMA 9/21, RSI, MACD)'
+        : 'Short-Term Horizon (1–5 days, intraday momentum EMA 9/21, RSI, MACD)';
 
     if (!ai) {
       return res.json({
-        analysis: generateFallbackAnalysis(symbol, currentPrice, currency, currLabel, timeframe, gauge, indicators, recentPatterns, lang),
+        analysis: generateFallbackAnalysis(
+          symbol,
+          currentPrice,
+          currency,
+          currLabel,
+          timeframe,
+          horizon,
+          horizonRec,
+          gauge,
+          indicators,
+          recentPatterns,
+          lang
+        ),
         source: 'quant_engine',
       });
     }
 
     const prompt = `You are a chief quantitative technical analyst at an elite hedge fund.
-Analyze the following asset market data for ${symbol} (${companyName}):
+Analyze the following asset market data for ${symbol} (${companyName}) specifically for the requested investment horizon:
+- Target Analysis Horizon: ${horizonLabel}
 - Current Price: ${currentPrice} ${currency} (${currLabel})
 - Asset Currency: ${currency}
-- Selected Timeframe: ${timeframe}
+- Chart Timeframe: ${timeframe}
+- Quantitative Horizon Signal: ${horizonRec?.action ?? 'HOLD'} (Score: ${horizonRec?.score ?? gauge?.score ?? 0}/100, Target: ${horizonRec?.targetPrice ?? 'N/A'}, Stop-Loss: ${horizonRec?.stopLoss ?? 'N/A'})
+- Key Horizon Reasons: ${JSON.stringify(horizonRec?.reasons ?? [])}
 - Technical Gauge Score: ${gauge?.score ?? 0}/100 (Overall: ${gauge?.overallRating ?? 'NEUTRAL'})
 - Oscillators: ${gauge?.oscillators?.buy ?? 0} Buy, ${gauge?.oscillators?.neutral ?? 0} Neutral, ${gauge?.oscillators?.sell ?? 0} Sell
 - Moving Averages: ${gauge?.movingAverages?.buy ?? 0} Buy, ${gauge?.movingAverages?.neutral ?? 0} Neutral, ${gauge?.movingAverages?.sell ?? 0} Sell
@@ -562,11 +607,11 @@ Analyze the following asset market data for ${symbol} (${companyName}):
 - Recent Patterns: ${JSON.stringify(recentPatterns ?? [])}
 
 Language of output: ${lang === 'cz' ? 'Czech (Čeština)' : 'English'}.
-CRITICAL: All price numbers MUST be in the asset's currency (${currency} / ${currLabel}). Do NOT use dollar sign if the currency is CZK.
+CRITICAL: Give a clear BUY (NÁKUP) / SELL (PRODEJ) / NEUTRAL recommendation tailored specifically to the ${horizon === 'long' ? 'LONG-TERM' : 'SHORT-TERM'} horizon. All price numbers MUST be in the asset's currency (${currency} / ${currLabel}).
 
 Respond ONLY with valid JSON conforming to this exact structure:
 {
-  "thesis": "Concise high-level professional market analysis describing trend, volume, and structure",
+  "thesis": "Concise professional Buy/Sell recommendation and market analysis tailored to ${horizon === 'long' ? 'long-term investors (weeks-months)' : 'short-term traders (intraday-5 days)'}",
   "bias": "BULLISH" | "BEARISH" | "NEUTRAL",
   "confidence": number between 60 and 96,
   "targetPrice1": number (conservative take-profit in ${currency}),
@@ -586,7 +631,7 @@ Respond ONLY with valid JSON conforming to this exact structure:
     "string: catalyst 1",
     "string: catalyst 2"
   ],
-  "executionPlan": "Specific trade execution instructions with entry trigger, stop-loss and profit target in ${currency}."
+  "executionPlan": "Specific ${horizon === 'long' ? 'long-term accumulation/exit' : 'short-term entry/exit'} instructions with price trigger, stop-loss and profit target in ${currency}."
 }`;
 
     const response = await ai.models.generateContent({
@@ -606,10 +651,33 @@ Respond ONLY with valid JSON conforming to this exact structure:
     });
   } catch (error: any) {
     console.error('Error in /api/gemini/analyze:', error);
-    const { symbol, currentPrice, currency = 'USD', timeframe, gauge, indicators, recentPatterns, lang = 'cz' } = req.body;
+    const {
+      symbol,
+      currentPrice,
+      currency = 'USD',
+      timeframe,
+      horizon = 'short',
+      horizonRec,
+      gauge,
+      indicators,
+      recentPatterns,
+      lang = 'cz',
+    } = req.body;
     const currLabel = currency.toUpperCase() === 'CZK' ? 'Kč' : currency.toUpperCase() === 'EUR' ? '€' : '$';
     return res.json({
-      analysis: generateFallbackAnalysis(symbol, currentPrice, currency, currLabel, timeframe, gauge, indicators, recentPatterns, lang),
+      analysis: generateFallbackAnalysis(
+        symbol,
+        currentPrice,
+        currency,
+        currLabel,
+        timeframe,
+        horizon,
+        horizonRec,
+        gauge,
+        indicators,
+        recentPatterns,
+        lang
+      ),
       source: 'quant_fallback',
     });
   }
@@ -621,20 +689,27 @@ function generateFallbackAnalysis(
   currency: string = 'USD',
   currLabel: string = '$',
   timeframe: string = '1h',
+  horizon: 'short' | 'long' = 'short',
+  horizonRec: any,
   gauge: any,
   indicators: any,
   patterns: any[],
   lang: string
 ) {
-  const isBull = gauge?.overallRating?.includes('BUY');
-  const isBear = gauge?.overallRating?.includes('SELL');
+  const score = typeof horizonRec?.score === 'number' ? horizonRec.score : (gauge?.score ?? 0);
+  const isBull = horizonRec?.action ? horizonRec.action.includes('BUY') : score >= 15;
+  const isBear = horizonRec?.action ? horizonRec.action.includes('SELL') : score <= -15;
   const bias = isBull ? 'BULLISH' : isBear ? 'BEARISH' : 'NEUTRAL';
-  const confidence = Math.min(94, Math.max(62, 55 + Math.abs(gauge?.score || 0) / 2));
+  const confidence = horizonRec?.confidence ?? Math.min(94, Math.max(62, 55 + Math.abs(score) / 2));
 
-  const atr = indicators?.atr || price * 0.018;
-  const target1 = isBull ? price + atr * 1.8 : price - atr * 1.8;
-  const target2 = isBull ? price + atr * 3.4 : price - atr * 3.4;
-  const invalidation = isBull ? price - atr * 1.1 : price + atr * 1.1;
+  const atr = indicators?.atr || price * (horizon === 'long' ? 0.032 : 0.015);
+  const mult1 = horizon === 'long' ? 3.0 : 1.6;
+  const mult2 = horizon === 'long' ? 5.2 : 3.0;
+  const stopMult = horizon === 'long' ? 2.0 : 1.1;
+
+  const target1 = horizonRec?.targetPrice ?? (isBull ? price + atr * mult1 : price - atr * mult1);
+  const target2 = isBull ? price + atr * mult2 : price - atr * mult2;
+  const invalidation = horizonRec?.stopLoss ?? (isBull ? price - atr * stopMult : price + atr * stopMult);
 
   const s1 = gauge?.pivotPoints?.classic?.s1 || price * 0.98;
   const s2 = gauge?.pivotPoints?.classic?.s2 || price * 0.96;
@@ -644,28 +719,37 @@ function generateFallbackAnalysis(
   const priceFormatted = (p: number) =>
     currency === 'CZK' ? `${p.toFixed(2)} Kč` : `${currLabel}${p.toFixed(2)}`;
 
+  const actionCz = isBull ? 'NÁKUP' : isBear ? 'PRODEJ' : 'VYČKAT / DRŽET';
+  const actionEn = isBull ? 'BUY' : isBear ? 'SELL' : 'HOLD';
+  const horizonTextCz = horizon === 'long' ? 'dlouhodobý úsek (1–6 měsíců)' : 'krátkodobý úsek (1–5 dní)';
+  const horizonTextEn = horizon === 'long' ? 'long-term horizon (1–6 months)' : 'short-term horizon (1–5 days)';
+
   return {
     thesis:
       lang === 'cz'
-        ? `Kvantitativní analýza pro ${symbol} (${timeframe}) indikuje ${
+        ? `Doporučení pro ${horizonTextCz} u ${symbol}: ${actionCz} (skóre ${score}/100). Kvantitativní analýza při ceně ${priceFormatted(price)} indikuje ${
             isBull
-              ? 'silné býčí momentum s pozitivní shodou klouzavých průměrů a rostoucím objemem na breakoutu'
+              ? horizon === 'long'
+                ? 'zdravou dlouhodobou akumulační strukturu s podporou klíčových klouzavých průměrů'
+                : 'krátkodobé nákupní momentum vhodné pro swing/intradenní vstup'
               : isBear
-              ? 'medvědí distribuci s odmítnutím rezistence a oslabením nákupního tlaku'
-              : 'konsolidační pásmo v rovnovážné zóně kolem pivotu'
-          }. Aktuální reálná cena je ${priceFormatted(price)} s technickým skóre ${gauge?.score ?? 0}/100.`
-        : `Quantitative analysis for ${symbol} (${timeframe}) indicates ${bias.toLowerCase()} momentum at current real price of ${priceFormatted(price)} with technical score ${gauge?.score ?? 0}/100.`,
+              ? horizon === 'long'
+                ? 'dlouhodobý klesající trend pod hlavními průměry a tlak na nižší úrovně'
+                : 'krátkodobé oslabení a prodejní tlak pod rychlými EMA'
+              : 'neutrální konsolidační pásmo bez jednoznačného průrazu'
+          }.`
+        : `${actionEn} recommendation for ${symbol} (${horizonTextEn}, score ${score}/100) at ${priceFormatted(price)}.`,
     bias,
     confidence: Math.round(confidence),
     targetPrice1: Number(target1.toFixed(2)),
     targetPrice2: Number(target2.toFixed(2)),
-    invalidationPrice: Number(invalidation.toFixed(2)),
-    riskRewardRatio: '1 : 2.5',
+    invalidationPrice: Number(Math.max(0.01, invalidation).toFixed(2)),
+    riskRewardRatio: horizonRec?.riskReward || '1 : 2.2',
     keyLevels: {
       support: [Number(s1.toFixed(2)), Number(s2.toFixed(2))],
       resistance: [Number(r1.toFixed(2)), Number(r2.toFixed(2))],
     },
-    insights: [
+    insights: (horizonRec?.reasons?.length ? horizonRec.reasons : null) || [
       `RSI (14) na hodnotě ${(indicators?.rsi || 50).toFixed(1)} ${
         (indicators?.rsi || 50) > 70
           ? 'ukazuje přehřátí trhu'
@@ -677,13 +761,15 @@ function generateFallbackAnalysis(
       `SuperTrend vykazuje ${indicators?.superTrend?.trend === 'up' ? 'býčí' : 'medvědí'} trajektorii.`,
     ],
     catalysts: [
-      `Reakce na hladině denního pivotu (${priceFormatted(gauge?.pivotPoints?.classic?.p || price)}) a 50 EMA`,
-      `Objemové toky a konsolidace v blízkosti pásem Bollinger Bands`,
+      horizon === 'long'
+        ? `Udržení dlouhodobé struktury nad/pod klouzavými průměry SMA 50 a SMA 200`
+        : `Reakce ceny na denním pivotu (${priceFormatted(gauge?.pivotPoints?.classic?.p || price)}) a krátkodobých EMA`,
+      `Objemové toky a proražení hranic Bollinger Bands`,
     ],
     executionPlan:
       lang === 'cz'
-        ? `Vstup na zpětném testu úrovně ${priceFormatted(isBull ? s1 : r1)}, invalidace pod ${priceFormatted(invalidation)}, profit target 1 na ${priceFormatted(target1)}.`
-        : `Enter upon pullback to ${priceFormatted(isBull ? s1 : r1)}, stop-loss below ${priceFormatted(invalidation)}, target 1 at ${priceFormatted(target1)}.`,
+        ? `${actionCz} (${horizonTextCz}): vstup u ${priceFormatted(price)}, stop-loss na ${priceFormatted(Math.max(0.01, invalidation))}, hlavní cíl ${priceFormatted(target1)}.`
+        : `${actionEn} (${horizonTextEn}): enter near ${priceFormatted(price)}, stop-loss at ${priceFormatted(Math.max(0.01, invalidation))}, target ${priceFormatted(target1)}.`,
   };
 }
 

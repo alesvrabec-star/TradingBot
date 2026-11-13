@@ -9,18 +9,18 @@ import {
   DrawingTool,
   OrderBook,
   MarketTrade,
+  AnalysisHorizon,
 } from './types/market';
 import {
   INITIAL_TICKERS,
   generateHistoricalCandles,
-  applyLiveTick,
   generateOrderBook,
   fetchMarketCandles,
   fetchMarketTickers,
   fetchMarketQuote,
 } from './utils/marketData';
 import { formatPrice, formatPriceCompact, formatVolume } from './utils/formatters';
-import { evaluateTechnicalGauge } from './utils/indicators';
+import { evaluateTechnicalGauge, evaluateHorizonRecommendation } from './utils/indicators';
 import { detectCandlePatterns } from './utils/patternDetection';
 import { TopNav } from './components/Header/TopNav';
 import { TickerBar } from './components/Watchlist/TickerBar';
@@ -90,6 +90,7 @@ export default function App() {
   const [isIndicatorModalOpen, setIsIndicatorModalOpen] = useState(false);
   const [isScreenerOpen, setIsScreenerOpen] = useState(false);
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
+  const [aiAnalysisHorizon, setAiAnalysisHorizon] = useState<AnalysisHorizon>('short');
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
   const [mobileTab, setMobileTab] = useState<'chart' | 'summary' | 'book'>('chart');
 
@@ -97,6 +98,8 @@ export default function App() {
   const [candles, setCandles] = useState<Candle[]>(() =>
     generateHistoricalCandles(INITIAL_TICKERS[0], '15m', 160)
   );
+  const [shortHorizonCandles, setShortHorizonCandles] = useState<Candle[]>([]);
+  const [longHorizonCandles, setLongHorizonCandles] = useState<Candle[]>([]);
   const [orderBook, setOrderBook] = useState<OrderBook>(() =>
     generateOrderBook(INITIAL_TICKERS[0].price)
   );
@@ -123,12 +126,34 @@ export default function App() {
     let isCancelled = false;
     setIsDataSyncing(true);
 
-    fetchMarketCandles(activeTicker.symbol, timeframe, activeTicker)
-      .then((realCandles) => {
+    Promise.all([
+      fetchMarketCandles(activeTicker.symbol, timeframe, activeTicker),
+      fetchMarketQuote(activeTicker.symbol),
+      timeframe === '15m'
+        ? Promise.resolve(null)
+        : fetchMarketCandles(activeTicker.symbol, '15m', activeTicker),
+      timeframe === '1D'
+        ? Promise.resolve(null)
+        : fetchMarketCandles(activeTicker.symbol, '1D', activeTicker),
+    ])
+      .then(([realCandles, liveQuote, shortCandles, longCandles]) => {
         if (isCancelled) return;
         setCandles(realCandles);
-        const latestPrice = realCandles[realCandles.length - 1]?.close || activeTicker.price;
-        setOrderBook(generateOrderBook(latestPrice));
+        setShortHorizonCandles(timeframe === '15m' ? realCandles : (shortCandles || realCandles));
+        setLongHorizonCandles(timeframe === '1D' ? realCandles : (longCandles || realCandles));
+        if (liveQuote && liveQuote.price) {
+          setActiveTicker((prev) => ({
+            ...prev,
+            ...liveQuote,
+          }));
+          setTickers((prev) =>
+            prev.map((t) => (t.symbol === liveQuote.symbol ? { ...t, ...liveQuote } : t))
+          );
+          setOrderBook(generateOrderBook(liveQuote.price));
+        } else {
+          const latestPrice = realCandles[realCandles.length - 1]?.close || activeTicker.price;
+          setOrderBook(generateOrderBook(latestPrice));
+        }
         setDrawings([]); // Clear drawings when switching asset
       })
       .finally(() => {
@@ -140,75 +165,72 @@ export default function App() {
     };
   }, [activeTicker.symbol, timeframe]);
 
-  // 3. Real-time Live Market Tick Simulation & Periodic Quote Sync
+  // 3. Real-time Live Market Sync (no fake random price drift; polls real quotes & intraday candles)
   useEffect(() => {
     if (!isStreaming) return;
 
-    // Fast micro-tick loop every 1.3s
-    const tickInterval = setInterval(() => {
-      setCandles((prevCandles) => {
-        if (prevCandles.length === 0) return prevCandles;
-        const currentClose = prevCandles[prevCandles.length - 1].close;
+    // Poll real live quote every 8s (captures live pre-market, regular, and post-market prices)
+    const quoteInterval = setInterval(() => {
+      fetchMarketQuote(activeTicker.symbol).then((q) => {
+        if (!q || !q.price) return;
 
-        const { updatedCandles, newTrade, newPrice } = applyLiveTick(prevCandles, timeframe);
-
-        const direction: 'up' | 'down' = newPrice >= currentClose ? 'up' : 'down';
         setLastTickTicker(activeTicker.symbol);
-        setLastTickDirection(direction);
-
-        // Update active ticker price and % change
-        setTickers((prevTickers) =>
-          prevTickers.map((t) => {
-            if (t.symbol === activeTicker.symbol) {
-              const delta = newPrice - (t.price - t.change);
-              const changePercent = (delta / (t.price - t.change)) * 100;
-              return {
-                ...t,
-                price: newPrice,
-                change: Number(delta.toFixed(2)),
-                changePercent: Number(changePercent.toFixed(2)),
-                high24h: Math.max(t.high24h, newPrice),
-                low24h: Math.min(t.low24h, newPrice),
-              };
-            }
-            return t;
-          })
-        );
+        setLastTickDirection(q.price >= activeTicker.price ? 'up' : 'down');
 
         setActiveTicker((prev) => ({
           ...prev,
-          price: newPrice,
+          ...q,
         }));
 
-        // Update Order Book & Trades Tape
-        setOrderBook(generateOrderBook(newPrice));
-        setTrades((prevTrades) => [newTrade, ...prevTrades.slice(0, 35)]);
+        setTickers((prevTickers) =>
+          prevTickers.map((t) => (t.symbol === q.symbol ? { ...t, ...q } : t))
+        );
 
-        return updatedCandles;
-      });
-    }, 1300);
+        // Keep intraday last candle aligned with true live quote without fabricating fake candles
+        if (timeframe !== '1D' && timeframe !== '1W') {
+          setCandles((prevCandles) => {
+            if (prevCandles.length === 0) return prevCandles;
+            const next = [...prevCandles];
+            const last = { ...next[next.length - 1] };
+            last.close = q.price;
+            last.high = Math.max(last.high, q.price);
+            last.low = Math.min(last.low, q.price);
+            next[next.length - 1] = last;
+            return next;
+          });
+        }
 
-    // Periodic live background market quote sync every 25s
-    const syncInterval = setInterval(() => {
-      fetchMarketQuote(activeTicker.symbol).then((q) => {
-        if (q && q.price) {
-          setActiveTicker((prev) => ({
-            ...prev,
+        setOrderBook(generateOrderBook(q.price));
+        setTrades((prevTrades) => [
+          {
+            id: `tr-${Date.now()}`,
+            time: Math.floor(Date.now() / 1000),
             price: q.price,
-            change: q.change,
-            changePercent: q.changePercent,
-            high24h: q.high24h,
-            low24h: q.low24h,
-            volume24h: q.volume24h,
-            currency: q.currency,
-          }));
+            size: Math.max(1, Math.round(Math.random() * 120)),
+            side: q.price >= activeTicker.price ? 'buy' : 'sell',
+          },
+          ...prevTrades.slice(0, 35),
+        ]);
+      });
+    }, 8000);
+
+    // Refresh full historical candles every 25s and refresh watchlist tickers every 30s
+    const candleInterval = setInterval(() => {
+      fetchMarketCandles(activeTicker.symbol, timeframe, activeTicker).then((realCandles) => {
+        if (realCandles && realCandles.length > 0) {
+          setCandles(realCandles);
+        }
+      });
+      fetchMarketTickers().then((liveTickers) => {
+        if (liveTickers && liveTickers.length > 0) {
+          setTickers(liveTickers);
         }
       });
     }, 25000);
 
     return () => {
-      clearInterval(tickInterval);
-      clearInterval(syncInterval);
+      clearInterval(quoteInterval);
+      clearInterval(candleInterval);
     };
   }, [isStreaming, timeframe, activeTicker.symbol]);
 
@@ -221,6 +243,24 @@ export default function App() {
   const { summary: technicalGauge, lastValues: indicatorValues } = useMemo(() => {
     return evaluateTechnicalGauge(candles);
   }, [candles]);
+
+  // Dedicated Short-Term (15m/1h) & Long-Term (1D/1W) Buy/Sell recommendations
+  const shortTermRec = useMemo(() => {
+    const source = shortHorizonCandles.length > 0 ? shortHorizonCandles : candles;
+    return evaluateHorizonRecommendation(source, 'short', activeTicker.price);
+  }, [shortHorizonCandles, candles, activeTicker.price]);
+
+  const longTermRec = useMemo(() => {
+    const source = longHorizonCandles.length > 0 ? longHorizonCandles : candles;
+    return evaluateHorizonRecommendation(source, 'long', activeTicker.price);
+  }, [longHorizonCandles, candles, activeTicker.price]);
+
+  const handleOpenAIAnalysis = (horizon?: AnalysisHorizon) => {
+    if (horizon) {
+      setAiAnalysisHorizon(horizon);
+    }
+    setIsAIModalOpen(true);
+  };
 
   const handleUpdateIndicators = (update: Partial<IndicatorConfig>) => {
     setIndicators((prev) => ({ ...prev, ...update }));
@@ -295,6 +335,17 @@ export default function App() {
             <span className="text-[9px] sm:text-[10px] font-mono px-1 sm:px-1.5 py-0.2 rounded bg-slate-800 text-emerald-400 font-semibold border border-slate-700/60">
               {activeTicker.currency}
             </span>
+            {activeTicker.marketSession && activeTicker.marketSession !== 'regular' && (
+              <span className="text-[9px] sm:text-[10px] font-medium px-1.5 py-0.2 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30">
+                {activeTicker.marketSession === 'pre'
+                  ? lang === 'cz'
+                    ? 'Předobchodní'
+                    : 'Pre-mkt'
+                  : lang === 'cz'
+                  ? 'Poobchodní'
+                  : 'Post-mkt'}
+              </span>
+            )}
           </div>
 
           <div className="hidden sm:flex items-center gap-3 text-xs text-slate-400 font-mono">
@@ -412,6 +463,7 @@ export default function App() {
             <TradingChart
               candles={candles}
               ticker={activeTicker}
+              timeframe={timeframe}
               patterns={patterns}
               indicators={indicators}
               onUpdateIndicators={handleUpdateIndicators}
@@ -444,7 +496,9 @@ export default function App() {
               timeframe={timeframe}
               gauge={technicalGauge}
               indicators={indicatorValues}
-              onOpenAIAnalysis={() => setIsAIModalOpen(true)}
+              shortTermRec={shortTermRec}
+              longTermRec={longTermRec}
+              onOpenAIAnalysis={handleOpenAIAnalysis}
               lang={lang}
             />
           </div>
@@ -491,6 +545,10 @@ export default function App() {
         gauge={technicalGauge}
         indicators={indicatorValues}
         patterns={patterns}
+        horizon={aiAnalysisHorizon}
+        onChangeHorizon={setAiAnalysisHorizon}
+        shortTermRec={shortTermRec}
+        longTermRec={longTermRec}
         lang={lang}
       />
 
