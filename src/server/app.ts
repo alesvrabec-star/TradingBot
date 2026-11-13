@@ -17,15 +17,33 @@ app.use((req, res, next) => {
     return res.sendStatus(200);
   }
 
-  // Recover original URL path if Vercel serverless function rewrite stripped it
-  const matchedPath =
-    req.headers['x-matched-path'] ||
-    req.headers['x-vercel-matched-path'] ||
-    req.headers['x-forwarded-uri'] ||
-    req.headers['x-original-url'];
+  // Recover original URL path if rewritten via Vercel __path param or proxy headers
+  try {
+    const urlObj = new URL(req.url || '/', 'http://localhost');
+    const pathParam = urlObj.searchParams.get('__path');
+    if (pathParam !== null) {
+      urlObj.searchParams.delete('__path');
+      const qs = urlObj.searchParams.toString();
+      const cleanPath = pathParam.startsWith('/') ? pathParam : `/${pathParam}`;
+      const rewritten = `/api${cleanPath}${qs ? `?${qs}` : ''}`;
+      req.url = rewritten;
+      (req as any).originalUrl = rewritten;
+    } else {
+      const matchedPath =
+        req.headers['x-matched-path'] ||
+        req.headers['x-vercel-matched-path'] ||
+        req.headers['x-forwarded-uri'] ||
+        req.headers['x-original-url'];
 
-  if (typeof matchedPath === 'string' && matchedPath.startsWith('/api') && req.url === '/api') {
-    req.url = matchedPath;
+      if (typeof matchedPath === 'string' && matchedPath.startsWith('/api/') && req.url === '/api') {
+        const qs = urlObj.searchParams.toString();
+        const rewritten = `${matchedPath}${qs ? `?${qs}` : ''}`;
+        req.url = rewritten;
+        (req as any).originalUrl = rewritten;
+      }
+    }
+  } catch {
+    // ignore URL parse errors
   }
 
   next();
@@ -44,9 +62,59 @@ if (process.env.GEMINI_API_KEY) {
   });
 }
 
-// In-memory cache for market quotes and candles to avoid redundant external calls
+// In-memory cache for market quotes, candles, and Yahoo auth cookie/crumb
 const quoteCache = new Map<string, { timestamp: number; data: any }>();
 const candleCache = new Map<string, { timestamp: number; data: any }>();
+let yahooAuthCache: { cookie: string; crumb: string; timestamp: number } | null = null;
+let yahooAuthPromise: Promise<{ cookie: string; crumb: string } | null> | null = null;
+
+const BROWSER_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+async function getYahooAuth(forceRefresh = false): Promise<{ cookie: string; crumb: string } | null> {
+  const now = Date.now();
+  if (!forceRefresh && yahooAuthCache && now - yahooAuthCache.timestamp < 15 * 60 * 1000) {
+    return { cookie: yahooAuthCache.cookie, crumb: yahooAuthCache.crumb };
+  }
+
+  if (yahooAuthPromise) {
+    return yahooAuthPromise;
+  }
+
+  yahooAuthPromise = (async () => {
+    try {
+      const cookieRes = await fetch('https://fc.yahoo.com', {
+        redirect: 'manual',
+        headers: { 'User-Agent': BROWSER_UA },
+        signal: AbortSignal.timeout(5000),
+      });
+      const setCookie = cookieRes.headers.get('set-cookie');
+      const cookie = setCookie ? setCookie.split(';')[0] : '';
+      if (!cookie) return null;
+
+      const crumbRes = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+        headers: {
+          'User-Agent': BROWSER_UA,
+          Cookie: cookie,
+        },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!crumbRes.ok) return null;
+
+      const crumb = (await crumbRes.text()).trim();
+      if (!crumb || crumb.startsWith('<')) return null;
+
+      yahooAuthCache = { cookie, crumb, timestamp: Date.now() };
+      return { cookie, crumb };
+    } catch {
+      return null;
+    } finally {
+      yahooAuthPromise = null;
+    }
+  })();
+
+  return yahooAuthPromise;
+}
 
 const DEFAULT_SYMBOLS_METADATA: Record<string, { name: string; sector: string }> = {
   NVDA: { name: 'NVIDIA Corporation', sector: 'Semiconductors & AI' },
@@ -71,17 +139,26 @@ async function fetchYahooChart(symbol: string, interval: string, range: string) 
 
   let lastError: Error | null = null;
 
+  // Attempt 1: direct (or with cached crumb if already present)
+  const cachedAuth = yahooAuthCache && Date.now() - yahooAuthCache.timestamp < 15 * 60 * 1000 ? yahooAuthCache : null;
+
   for (const host of hosts) {
     try {
-      const url = `${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}`;
+      const crumbParam = cachedAuth ? `&crumb=${encodeURIComponent(cachedAuth.crumb)}` : '';
+      const url = `${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}${crumbParam}`;
+      const headers: Record<string, string> = {
+        'User-Agent': BROWSER_UA,
+        Accept: 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        Referer: 'https://finance.yahoo.com/',
+      };
+      if (cachedAuth?.cookie) {
+        headers.Cookie = cachedAuth.cookie;
+      }
+
       const response = await fetch(url, {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          Accept: 'application/json, text/plain, */*',
-          'Accept-Language': 'en-US,en;q=0.9',
-          Referer: 'https://finance.yahoo.com/',
-        },
+        headers,
+        signal: AbortSignal.timeout(5500),
       });
 
       if (response.ok) {
@@ -98,7 +175,69 @@ async function fetchYahooChart(symbol: string, interval: string, range: string) 
     }
   }
 
+  // Attempt 2: Refresh cookie + crumb (essential when cloud/Vercel IPs receive 401/403)
+  const freshAuth = await getYahooAuth(true);
+  if (freshAuth) {
+    for (const host of hosts) {
+      try {
+        const url = `${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&crumb=${encodeURIComponent(freshAuth.crumb)}`;
+        const response = await fetch(url, {
+          headers: {
+            'User-Agent': BROWSER_UA,
+            Accept: 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            Referer: 'https://finance.yahoo.com/',
+            Cookie: freshAuth.cookie,
+          },
+          signal: AbortSignal.timeout(5500),
+        });
+
+        if (response.ok) {
+          const json = await response.json();
+          const result = json?.chart?.result?.[0];
+          if (result) {
+            return result;
+          }
+        } else {
+          lastError = new Error(`Yahoo Finance auth (${host}) returned status ${response.status}`);
+        }
+      } catch (err: any) {
+        lastError = err;
+      }
+    }
+  }
+
   throw lastError || new Error(`No data returned for symbol: ${symbol}`);
+}
+
+async function fetchKrakenBTC(timeframe: string) {
+  const intervalMap: Record<string, number> = {
+    '1m': 1,
+    '5m': 5,
+    '15m': 15,
+    '1h': 60,
+    '4h': 240,
+    '1D': 1440,
+    '1W': 10080,
+  };
+  const kInterval = intervalMap[timeframe] || 15;
+  const res = await fetch(`https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=${kInterval}`, {
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) throw new Error(`Kraken HTTP ${res.status}`);
+  const json = await res.json();
+  const rows = json?.result?.XXBTZUSD;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error('Empty Kraken OHLC');
+  }
+  return rows.slice(-180).map((r: any) => ({
+    time: Number(r[0]),
+    open: Number(parseFloat(r[1]).toFixed(2)),
+    high: Number(parseFloat(r[2]).toFixed(2)),
+    low: Number(parseFloat(r[3]).toFixed(2)),
+    close: Number(parseFloat(r[4]).toFixed(2)),
+    volume: Math.round(parseFloat(r[6]) * parseFloat(r[4])),
+  }));
 }
 
 // Router containing all market and AI routes
@@ -114,6 +253,8 @@ router.get('/market/quote/:symbol', async (req: Request, res: Response) => {
   const symbol = req.params.symbol.toUpperCase();
   const cacheKey = `quote_${symbol}`;
   const now = Date.now();
+
+  res.set('Cache-Control', 'no-store, max-age=0');
 
   const cached = quoteCache.get(cacheKey);
   if (cached && now - cached.timestamp < 15000) {
@@ -154,26 +295,7 @@ router.get('/market/quote/:symbol', async (req: Request, res: Response) => {
     res.json(quoteData);
   } catch (err: any) {
     console.error(`Error fetching quote for ${symbol}:`, err.message);
-    // Reliable fallback for known symbols if API is throttled
-    const fallbackPrice = symbol === 'CEZ.PR' ? 1332.0 : symbol === 'BTC-USD' ? 74000.0 : symbol === 'NVDA' ? 168.89 : 100;
-    const fallbackCurrency = symbol.endsWith('.PR') ? 'CZK' : 'USD';
-    const fallbackData = {
-      symbol,
-      name: DEFAULT_SYMBOLS_METADATA[symbol]?.name || symbol,
-      price: fallbackPrice,
-      change: -4.0,
-      changePercent: -0.3,
-      high24h: fallbackPrice * 1.01,
-      low24h: fallbackPrice * 0.99,
-      volume24h: 350000,
-      currency: fallbackCurrency,
-      exchange: symbol.endsWith('.PR') ? 'PRA' : 'NASDAQ',
-      sector: DEFAULT_SYMBOLS_METADATA[symbol]?.sector || 'Equity',
-      fiftyTwoWeekHigh: fallbackPrice * 1.15,
-      fiftyTwoWeekLow: fallbackPrice * 0.85,
-      timestamp: now,
-    };
-    res.json(fallbackData);
+    res.status(502).json({ error: err.message });
   }
 });
 
@@ -285,30 +407,54 @@ router.get('/market/candles/:symbol', async (req: Request, res: Response) => {
       timeframe,
       candles: candlesToReturn,
       lastPrice: meta.regularMarketPrice ?? (candlesToReturn[candlesToReturn.length - 1]?.close || 100),
+      source: 'yahoo_live',
     };
 
     candleCache.set(cacheKey, { timestamp: now, data: payload });
+    res.set('Cache-Control', 'no-store, max-age=0');
     res.json(payload);
   } catch (err: any) {
+    if (symbol === 'BTC-USD') {
+      try {
+        const krakenCandles = await fetchKrakenBTC(timeframe);
+        const lastPrice = krakenCandles[krakenCandles.length - 1]?.close || 73340;
+        const payload = {
+          symbol: 'BTC-USD',
+          currency: 'USD',
+          exchange: 'Kraken Spot',
+          timeframe,
+          candles: krakenCandles,
+          lastPrice,
+          source: 'kraken_live',
+        };
+        candleCache.set(cacheKey, { timestamp: now, data: payload });
+        res.set('Cache-Control', 'no-store, max-age=0');
+        return res.json(payload);
+      } catch (kErr: any) {
+        console.error('Kraken fallback failed:', kErr.message);
+      }
+    }
     console.error(`Error fetching candles for ${symbol}:`, err.message);
+    res.set('Cache-Control', 'no-store, max-age=0');
     res.status(500).json({ error: err.message });
   }
 });
 
-// 3. Batch Fetch Quotes for All Watchlist Tickers
+// 3. Batch Fetch Quotes for All Watchlist Tickers (Parallel for Vercel Serverless Speed)
 router.get('/market/tickers', async (req: Request, res: Response) => {
   const symbols = ['CEZ.PR', 'NVDA', 'AAPL', 'TSLA', 'MSFT', 'SPY', 'QQQ', 'BTC-USD', 'ERBAG.PR', 'KOMB.PR'];
-  const results = [];
 
-  for (const sym of symbols) {
-    try {
-      const cacheKey = `quote_${sym}`;
-      const now = Date.now();
-      const cached = quoteCache.get(cacheKey);
+  const results = await Promise.all(
+    symbols.map(async (sym) => {
+      try {
+        const cacheKey = `quote_${sym}`;
+        const now = Date.now();
+        const cached = quoteCache.get(cacheKey);
 
-      if (cached && now - cached.timestamp < 30000) {
-        results.push(cached.data);
-      } else {
+        if (cached && now - cached.timestamp < 30000) {
+          return cached.data;
+        }
+
         const chart = await fetchYahooChart(sym, '15m', '1d');
         const meta = chart.meta;
         const currentPrice = meta.regularMarketPrice ?? meta.chartPreviousClose ?? 100;
@@ -338,38 +484,39 @@ router.get('/market/tickers', async (req: Request, res: Response) => {
         };
 
         quoteCache.set(cacheKey, { timestamp: now, data: item });
-        results.push(item);
+        return item;
+      } catch (err: any) {
+        console.warn(`Fallback for ${sym}:`, err.message);
+        const fallbackPrice =
+          sym === 'CEZ.PR' ? 1341.0 :
+          sym === 'BTC-USD' ? 73340.0 :
+          sym === 'NVDA' ? 173.73 :
+          sym === 'MSFT' ? 521.13 :
+          sym === 'AAPL' ? 355.63 :
+          sym === 'TSLA' ? 390.84 :
+          sym === 'SPY' ? 759.81 :
+          sym === 'QQQ' ? 690.38 :
+          sym === 'ERBAG.PR' ? 2859.0 :
+          sym === 'KOMB.PR' ? 995.0 : 250.0;
+        const fallbackCurrency = sym.endsWith('.PR') ? 'CZK' : 'USD';
+        return {
+          symbol: sym,
+          name: DEFAULT_SYMBOLS_METADATA[sym]?.name || sym,
+          price: fallbackPrice,
+          change: 0.0,
+          changePercent: 0.0,
+          high24h: fallbackPrice * 1.01,
+          low24h: fallbackPrice * 0.99,
+          volume24h: 1000000,
+          currency: fallbackCurrency,
+          exchange: sym.endsWith('.PR') ? 'Praha (PX)' : 'NASDAQ',
+          sector: DEFAULT_SYMBOLS_METADATA[sym]?.sector || 'Equity',
+        };
       }
-    } catch (err: any) {
-      console.warn(`Fallback for ${sym}:`, err.message);
-      const fallbackPrice =
-        sym === 'CEZ.PR' ? 1341.0 :
-        sym === 'BTC-USD' ? 73340.0 :
-        sym === 'NVDA' ? 173.73 :
-        sym === 'MSFT' ? 521.13 :
-        sym === 'AAPL' ? 355.63 :
-        sym === 'TSLA' ? 390.84 :
-        sym === 'SPY' ? 759.81 :
-        sym === 'QQQ' ? 690.38 :
-        sym === 'ERBAG.PR' ? 2859.0 :
-        sym === 'KOMB.PR' ? 995.0 : 250.0;
-      const fallbackCurrency = sym.endsWith('.PR') ? 'CZK' : 'USD';
-      results.push({
-        symbol: sym,
-        name: DEFAULT_SYMBOLS_METADATA[sym]?.name || sym,
-        price: fallbackPrice,
-        change: 0.0,
-        changePercent: 0.0,
-        high24h: fallbackPrice * 1.01,
-        low24h: fallbackPrice * 0.99,
-        volume24h: 1000000,
-        currency: fallbackCurrency,
-        exchange: sym.endsWith('.PR') ? 'Praha (PX)' : 'NASDAQ',
-        sector: DEFAULT_SYMBOLS_METADATA[sym]?.sector || 'Equity',
-      });
-    }
-  }
+    })
+  );
 
+  res.set('Cache-Control', 'no-store, max-age=0');
   res.json({ tickers: results });
 });
 

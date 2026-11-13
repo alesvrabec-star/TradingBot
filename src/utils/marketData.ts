@@ -164,43 +164,45 @@ export function generateHistoricalCandles(ticker: Ticker, timeframe: Timeframe, 
   const now = Math.floor(Date.now() / 1000);
   const startTime = now - count * stepSeconds;
 
-  let basePrice = ticker.price * 0.88;
-  const volatility = ticker.symbol.includes('BTC') ? 0.012 : ticker.symbol === 'TSLA' || ticker.symbol === 'NVDA' ? 0.008 : 0.005;
+  // Deterministic per-symbol seed so offline fallback never shows identical charts
+  let seed = 0;
+  for (let idx = 0; idx < ticker.symbol.length; idx++) {
+    seed = (seed * 31 + ticker.symbol.charCodeAt(idx)) % 100000;
+  }
+  const seededRand = () => {
+    seed = (seed * 1664525 + 1013904223) % 4294967296;
+    return seed / 4294967296;
+  };
+
+  const volatility = ticker.symbol.includes('BTC') ? 0.008 : ticker.symbol === 'TSLA' || ticker.symbol === 'NVDA' ? 0.006 : 0.0035;
+  const rawPrices: number[] = [ticker.price];
+
+  // Walk backwards from current real price so final candle connects smoothly
+  for (let i = 1; i <= count; i++) {
+    const prev = rawPrices[0];
+    const shock = (seededRand() - 0.5) * volatility * 2;
+    const wave = Math.sin((i / (12 + (seed % 9))) * Math.PI) * volatility * 0.6;
+    rawPrices.unshift(Math.max(0.01, prev * (1 - shock - wave)));
+  }
 
   const candles: Candle[] = [];
-  let currentClose = basePrice;
-
-  // Simulate market drift and cycles
   for (let i = 0; i < count; i++) {
     const time = startTime + i * stepSeconds;
-
-    // Cycles: trend wave + micro shocks + periodic consolidation
-    const cycle = Math.sin((i / 18) * Math.PI) * 0.003 + Math.cos((i / 40) * Math.PI) * 0.006;
-    const randomShock = (Math.random() - 0.485) * volatility;
-    const priceChangeRatio = 1 + cycle + randomShock;
-
-    const open = currentClose;
-    let close = open * priceChangeRatio;
-
-    // Align the very last candle to the ticker's current price
-    if (i === count - 1) {
-      close = ticker.price;
-    }
+    const open = rawPrices[i];
+    const close = i === count - 1 ? ticker.price : rawPrices[i + 1];
 
     const maxOC = Math.max(open, close);
     const minOC = Math.min(open, close);
-
-    const highExtra = Math.random() * volatility * open * 1.5;
-    const lowExtra = Math.random() * volatility * open * 1.5;
+    const highExtra = seededRand() * volatility * open * 1.1;
+    const lowExtra = seededRand() * volatility * open * 1.1;
 
     const high = Number((maxOC + highExtra).toFixed(2));
     const low = Number(Math.max(0.01, minOC - lowExtra).toFixed(2));
     const finalOpen = Number(open.toFixed(2));
     const finalClose = Number(close.toFixed(2));
 
-    // Base volume with spikes on large candle bodies
     const bodySize = Math.abs(finalClose - finalOpen) / finalOpen;
-    const volumeMultiplier = 1 + bodySize * 80 + Math.random() * 0.5;
+    const volumeMultiplier = 1 + bodySize * 60 + seededRand() * 0.5;
     const baseVol = ticker.volume24h / (count * 2);
     const volume = Math.round(baseVol * volumeMultiplier);
 
@@ -212,8 +214,6 @@ export function generateHistoricalCandles(ticker: Ticker, timeframe: Timeframe, 
       close: finalClose,
       volume,
     });
-
-    currentClose = finalClose;
   }
 
   return candles;
@@ -325,18 +325,25 @@ export function generateOrderBook(midPrice: number, spreadPercent: number = 0.02
 }
 
 /**
- * Fetches real historical market candles from backend API
+ * Fetches real historical market candles from backend API (with retry on serverless cold start)
  */
 export async function fetchMarketCandles(symbol: string, timeframe: Timeframe, fallbackTicker: Ticker): Promise<Candle[]> {
-  try {
-    const res = await fetch(`/api/market/candles/${encodeURIComponent(symbol)}?timeframe=${timeframe}`);
-    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
-    const data = await res.json();
-    if (data.candles && data.candles.length >= 10) {
-      return data.candles;
+  const url = `/api/market/candles/${encodeURIComponent(symbol)}?timeframe=${timeframe}`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+      const data = await res.json();
+      if (data.candles && data.candles.length >= 10) {
+        return data.candles;
+      }
+    } catch (err) {
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 600));
+        continue;
+      }
+      console.warn(`Falling back to generated candles for ${symbol}:`, err);
     }
-  } catch (err) {
-    console.warn(`Falling back to generated candles for ${symbol}:`, err);
   }
   return generateHistoricalCandles(fallbackTicker, timeframe, 160);
 }
@@ -346,7 +353,7 @@ export async function fetchMarketCandles(symbol: string, timeframe: Timeframe, f
  */
 export async function fetchMarketTickers(): Promise<Ticker[]> {
   try {
-    const res = await fetch('/api/market/tickers');
+    const res = await fetch('/api/market/tickers', { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP error ${res.status}`);
     const data = await res.json();
     if (data.tickers && data.tickers.length > 0) {
@@ -363,7 +370,7 @@ export async function fetchMarketTickers(): Promise<Ticker[]> {
  */
 export async function fetchMarketQuote(symbol: string): Promise<Ticker | null> {
   try {
-    const res = await fetch(`/api/market/quote/${encodeURIComponent(symbol)}`);
+    const res = await fetch(`/api/market/quote/${encodeURIComponent(symbol)}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP error ${res.status}`);
     return await res.json();
   } catch (err) {
